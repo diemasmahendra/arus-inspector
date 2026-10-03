@@ -6,7 +6,7 @@ A focused desktop HTTP / HTTPS traffic inspector for Windows. Built with Electro
 
 ## Download
 
-Get **Arus-Setup-VERSION.exe** from [Releases](https://github.com/diemasmahendra/arus-inspector/releases). The first installer appears when the GitHub Actions build succeeds. Windows x64 is the initial supported target.
+Get **Arus-Setup-VERSION.exe** from [Releases](https://github.com/diemasmahendra/arus-inspector/releases). Installers are published after the GitHub Actions build and packaged Windows tests succeed. Windows x64 is the initial supported target.
 
 ## Getting started
 
@@ -16,7 +16,7 @@ Get **Arus-Setup-VERSION.exe** from [Releases](https://github.com/diemasmahendra
 
 The built-in browser trusts only the local Arus capture CA within its own session. Arus does not change your system proxy or install a system certificate automatically. The upstream proxy validates server TLS certificates.
 
-To connect another browser: open **Panduan koneksi**, set its HTTP and HTTPS proxy to the shown loopback address, and import the exported CA into that browser's trust store for HTTPS inspection. The port may change on restart. Restore proxy settings and remove the CA when finished.
+To connect another browser: open **Panduan**, set its HTTP and HTTPS proxy to the shown loopback address, and import the exported CA into that browser's trust store for HTTPS inspection. The port may change on restart. Restore proxy settings and remove the CA when finished.
 
 ## Features
 
@@ -25,9 +25,11 @@ To connect another browser: open **Panduan koneksi**, set its HTTP and HTTPS pro
 - Request / response bodies, headers, metadata, and pretty JSON.
 - Resizable inspector, keyboard navigation, Ctrl+K search, Space to pause/resume.
 - Copy cURL (redacted by default, full copy available with confirmation).
-- Edit and replay requests with a 30-second timeout and no automatic browser cookies. Redirects are not followed. Explicit request headers are sent as entered.
+- Edit and replay requests with a 30-second timeout and no automatic browser cookies. Redirects are not followed. Browser-managed Sec-* metadata and transport headers are rebuilt by Chromium; other explicit request headers are retained.
 - HAR export. Standard export redacts known sensitive headers and query parameters, omits bodies. Full export requires confirmation. Review any export before sharing: arbitrary headers and URL path segments can contain sensitive data.
 - GitHub Releases update checks, download progress, and restart-to-install.
+- AI chat and controlled application tools, with five editable Markdown profiles.
+- Offline Geist fonts, Lucide icons, and three display sizes.
 
 ## Privacy and limits
 
@@ -35,9 +37,11 @@ No telemetry or account is implemented. Capture records are kept in memory, boun
 
 Pause stops recording into Arus; the proxy continues forwarding traffic. Closing Arus stops its proxy. Browser popups open in the same capture window. Downloads and device permissions are disabled in the capture browser. Browser sessions are temporary. This is a debugging browser, not a replacement for your daily browser.
 
-This first version does not display WebSocket frames, SSE streams, gRPC/protobuf decoding, Android patching, AI analysis, or traffic that bypasses the configured proxy. Some sites reject embedded Chromium browsers. Apps using certificate pinning may reject the proxy CA.
+Arus does not display WebSocket frames, SSE streams, gRPC/protobuf decoding, Android patching, or traffic that bypasses the configured proxy. Some sites reject embedded Chromium browsers. Apps using certificate pinning may reject the proxy CA.
 
-The initial Windows installer is unsigned. Windows may show an unknown-publisher/SmartScreen message. Release assets include update metadata with SHA-512 checksums; code signing requires a signing certificate and is not configured in this repository yet. Updates are not downloaded or installed without clicking the relevant action.
+See [SECURITY.md](SECURITY.md) for the known upstream node-forge advisory and current exposure assessment.
+
+The Windows installer is unsigned. Windows may show an unknown-publisher/SmartScreen message. Release assets include update metadata with SHA-512 checksums; code signing requires a signing certificate and is not configured in this repository yet. Updates are not downloaded or installed without clicking the relevant action.
 
 ## Development
 
@@ -67,3 +71,33 @@ git push origin main
 The workflow publishes the installer, blockmap, and `latest.yml` update metadata. GitHub Actions must be enabled and allowed to write repository contents. Existing versions are never silently replaced; increase the version for each release.
 
 MIT license. See [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## AI Agent (v0.2)
+
+![Arus AI Agent using a local test provider](docs/agent.png)
+
+[Markdown profile settings](docs/agent-settings.png)
+
+Open **AI Agent → Pengaturan** and enter a base URL, model name, and optional API key for an OpenAI-compatible **Chat Completions endpoint with tool calling**. The base URL must include the API prefix (for example `http://127.0.0.1:20128/v1`). HTTPS is required for remote providers; HTTP is allowed only on loopback. Arus adds `/chat/completions`. No provider subscription or model is bundled.
+
+The agent can inspect captured JSON, search/filter traffic, select requests, pause/resume capture, open the Arus browser, prepare/edit/replay requests, copy redacted cURL, export the entire standard HAR, check updates, change display size, and add memories. Browser navigation, replay, clearing traffic, and memory additions request local approval. Cancelling the agent stops further steps; actions already completed remain in effect. Replays use original local headers/body, never masked placeholders. Requests are sent without automatic browser cookies.
+
+Five editable Markdown files guide each conversation:
+
+| File | Purpose |
+| --- | --- |
+| `IDENTITY.md` | Agent name, role, language |
+| `SOUL.md` | Personality and communication |
+| `AGENTS.md` | Goals and workflow |
+| `TOOLS.md` | Guidance for Arus tools |
+| `MEMORY.md` | Persistent notes |
+
+Import one or several of these `.md` files in settings (names are case-insensitive), edit them, then save. Export writes the saved profiles as five real files into a chosen folder. Defaults ship in `src/agent-profiles/`. Each file is limited to 24 kB and the total to 80 kB. Instructions cannot enable shell commands, arbitrary filesystem access, or control other desktop apps. Memory additions by the model require confirmation; edits in settings are saved explicitly.
+
+Provider settings and profiles remain in Electron's per-user application-data folder, not in this repository. On Windows, API keys use Electron's OS-backed safeStorage encryption. Where secure encryption is unavailable (including Linux `basic_text` storage), keys remain in session memory and are not written to disk. Empty API-key input preserves the current key; use the removal checkbox to erase it. Chats remain in session memory and reset on restart or settings changes.
+
+**Data sent to your selected provider:** your messages, all five profiles, the selected request if enabled, and traffic requested through tools. Known sensitive header/query/JSON fields are masked, non-JSON bodies are omitted, and context is bounded. Masking is heuristic and cannot guarantee removal of secrets hidden in unexpected fields, URL paths, or free text. Review your data and provider policies before sharing private traffic. Website responses and tool outputs are treated as untrusted data. No arbitrary code or shell tools are exposed. No live commercial-model connection is required by the tests; a local mock provider verifies the actual tool loop and UI.
+
+## Readability
+
+Geist Sans, Geist Mono, and selected Lucide icons are bundled for offline use. **Tampilan** offers Ringkas, Nyaman (default), and Besar, remembered locally. The agent panel can be collapsed while inspecting traffic.

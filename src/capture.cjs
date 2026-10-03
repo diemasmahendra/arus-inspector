@@ -14,6 +14,11 @@ const secretHeader = /^(authorization|proxy-authorization|cookie|set-cookie|x-ap
 const secretKey = /token|password|secret|api.?key|authorization|session|credential|otp/i;
 function redactUrl(url) { const u = new URL(url); for (const key of u.searchParams.keys()) if (secretKey.test(key)) u.searchParams.set(key, '[REDACTED]'); u.hash = ''; return u.href; }
 function redactHeaders(headers) { return Object.fromEntries(Object.entries(headers || {}).map(([k,v]) => [k, secretHeader.test(k) ? '[REDACTED]' : v])); }
+function replayHeaders(headers) {
+  // Chromium rebuilds its Sec-* metadata for this independent request context.
+  const managed=/^(:|sec-|host$|content-length$|connection$|proxy-connection$|accept-encoding$|transfer-encoding$|upgrade$|te$|trailer$|keep-alive$)/i;
+  return Object.fromEntries(Object.entries(headers || {}).filter(([key])=>!managed.test(key)));
+}
 function curl(row, sensitive = false) {
   const quote = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
   const headers = sensitive ? row.requestHeaders : redactHeaders(row.requestHeaders);
@@ -64,4 +69,4 @@ class CaptureStore {
     }))}};
   }
 }
-module.exports = {CaptureStore, validUrl, isText, clip, curl, redactHeaders, redactUrl, MAX_BODY};
+module.exports = {CaptureStore, validUrl, isText, clip, curl, redactHeaders, redactUrl, replayHeaders, MAX_BODY};

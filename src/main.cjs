@@ -1,8 +1,11 @@
-const {app, BrowserWindow, ipcMain, clipboard, dialog, session, utilityProcess} = require('electron');
+const {app, BrowserWindow, ipcMain, clipboard, dialog, session, utilityProcess, safeStorage} = require('electron');
 const path = require('node:path');
-const {X509Certificate} = require('node:crypto');
+const {X509Certificate,randomUUID} = require('node:crypto');
 const fs = require('node:fs/promises');
-const {CaptureStore, validUrl, isText, clip, curl, MAX_BODY} = require('./capture.cjs');
+const {CaptureStore, validUrl, isText, clip, curl, replayHeaders, MAX_BODY} = require('./capture.cjs');
+const {Agent, FILES, MAX_FILE, safeRow} = require('./agent.cjs');
+const AGENT_APPROVED=Symbol('agent-approved');
+const actions = {}; const uiPending = new Map(); let agent;
 let inspector, browser, capturing = true, updater, updateState = {status:'idle'};
 let pending = [], timer, engine, enginePort, rootCertificate, enginePromise, engineState = 'starting';
 function startEngine() {
@@ -69,12 +72,29 @@ async function makeBrowser(url) {
   status(); await win.loadURL(url);
 }
 function handle(channel, fn) {
+  actions[channel] = fn;
   ipcMain.handle(channel, async (event, ...args)=>{
     if (!inspector || event.sender !== inspector.webContents || event.senderFrame !== inspector.webContents.mainFrame) throw new Error('Akses ditolak.');
     return fn(...args);
   });
 }
 function setupIpc() {
+  handle('agent-ui-result',(id,result)=>{const pending=uiPending.get(id);if(pending)pending.finish(result);return true;});
+  handle('agent-state',async()=>{await agent.ready;return agent.state();});
+  handle('agent-save',data=>agent.save(data));
+  handle('agent-chat',data=>agent.chat(data));
+  handle('agent-cancel',()=>agent.cancel());
+  handle('agent-reset',()=>agent.reset());
+  handle('agent-import',async()=>{
+    const {canceled,filePaths}=await dialog.showOpenDialog(inspector,{title:'Import arahan agent',properties:['openFile','multiSelections'],filters:[{name:'Markdown',extensions:['md']}]});
+    if(canceled)return null;const files={};
+    for(const file of filePaths){const name=FILES.find(n=>n.toLowerCase()===path.basename(file).toLowerCase());if(!name)throw new Error('Pilih IDENTITY.md, SOUL.md, AGENTS.md, TOOLS.md, atau MEMORY.md.');const stat=await fs.stat(file);if(stat.size>MAX_FILE)throw new Error(`${name} maksimal 24 kB.`);files[name]=await fs.readFile(file,'utf8');}return files;
+  });
+  handle('agent-export-files',async()=>{
+    await agent.ready;const {canceled,filePaths}=await dialog.showOpenDialog(inspector,{title:'Simpan lima file Markdown',properties:['openDirectory','createDirectory']});if(canceled)return false;
+    const directory=filePaths[0];for(const name of FILES){try{await fs.access(path.join(directory,name));const {response}=await dialog.showMessageBox(inspector,{buttons:['Batal','Timpa file'],defaultId:0,cancelId:0,message:'Folder ini sudah memiliki file arahan. Timpa lima file Markdown?'});if(response!==1)return false;break;}catch{}}
+    for(const name of FILES)await fs.writeFile(path.join(directory,name),agent.config.files[name]);return true;
+  });
   handle('state',()=>({rows:store.list(),capturing,browserOpen:!!browser,engine:engineState,port:enginePort,version:app.getVersion(),update:updateState}));
   handle('open',async url=>{await enginePromise;await makeBrowser(validUrl(url));return true;});
   handle('control', action=>{
@@ -107,13 +127,14 @@ function setupIpc() {
     const {canceled,filePath}=await dialog.showSaveDialog(inspector,{defaultPath:`arus-${Date.now()}.har`,filters:[{name:'HTTP Archive',extensions:['har']}]});
     if(canceled || !filePath) return false; await fs.writeFile(filePath,JSON.stringify(store.har(sensitive),null,2));return true;
   });
-  handle('replay',async data=>{
+  handle('replay',async (data,approval)=>{
     const url=validUrl(data?.url), method=String(data?.method || 'GET').toUpperCase();
     if(!['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].includes(method)) throw new Error('Metode tidak valid.');
     if(typeof data.headers!=='string' || data.headers.length>64000 || typeof data.body!=='string' || data.body.length>MAX_BODY) throw new Error('Request terlalu besar.');
-    const headers=JSON.parse(data.headers || '{}');
-    if(!headers || Array.isArray(headers) || typeof headers!=='object' || Object.entries(headers).some(([k,v])=>typeof v!=='string' || /[\r\n]/.test(k+v))) throw new Error('Header harus berupa objek JSON dengan nilai teks.');
-    if (method!=='GET' && method!=='HEAD') {const {response}=await dialog.showMessageBox(inspector,{type:'question',buttons:['Batal',`Kirim ${method}`],defaultId:0,cancelId:0,message:`Kirim request ${method}?`,detail:`Request ini dapat mengubah data di server.\n${url}`});if(response!==1)return null;}
+    const parsed=JSON.parse(data.headers || '{}');
+    if(!parsed || Array.isArray(parsed) || typeof parsed!=='object' || Object.entries(parsed).some(([k,v])=>typeof v!=='string' || /[\r\n]/.test(k+v))) throw new Error('Header harus berupa objek JSON dengan nilai teks.');
+    const headers=replayHeaders(parsed);
+    if (method!=='GET' && method!=='HEAD' && approval!==AGENT_APPROVED) {const {response}=await dialog.showMessageBox(inspector,{type:'question',buttons:['Batal',`Kirim ${method}`],defaultId:0,cancelId:0,message:`Kirim request ${method}?`,detail:`Request ini dapat mengubah data di server.\n${url}`});if(response!==1)return null;}
     const row=store.add({url,method,type:'Replay',requestHeaders:headers,requestBody:['GET','HEAD'].includes(method)?'':data.body});
     const start=performance.now(), generation=store.generation;
     try {
@@ -132,12 +153,59 @@ function setupIpc() {
     else throw new Error('Aksi pembaruan tidak tersedia.');return true;
   });
 }
+function replayData(args){
+  const row=store.get(args.id);if(!row)throw Error('Request sudah tidak tersedia.');
+  const headers=replayHeaders(row.requestHeaders);
+  let edited=headers;
+  if(args.headers!==undefined){const patch=JSON.parse(args.headers);if(!patch || typeof patch!=='object' || Array.isArray(patch) || Object.values(patch).some(v=>typeof v!=='string' || v.includes('[REDACTED]')))throw Error('Header edit harus JSON object tanpa placeholder rahasia.');edited={...headers,...patch};}
+  if(args.body?.includes('[REDACTED]'))throw Error('Isi body asli atau perubahan tanpa placeholder rahasia.');
+  const method=args.method===undefined?row.method:args.method.toUpperCase();if(!['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].includes(method))throw Error('Metode tidak valid.');
+  return {url:validUrl(args.url===undefined?row.url:args.url),method,headers:JSON.stringify(replayHeaders(edited),null,2),body:args.body===undefined?row.requestBody:args.body};
+}
+async function confirmAgent(message,detail,signal){
+  signal.throwIfAborted();const {response}=await dialog.showMessageBox(inspector,{type:'question',buttons:['Batal','Setujui'],defaultId:0,cancelId:0,message,detail});signal.throwIfAborted();return response===1;
+}
+function agentUi(name,args,signal){
+  signal.throwIfAborted();return new Promise((resolve,reject)=>{
+    const id=randomUUID();let timeout;
+    const finish=result=>{clearTimeout(timeout);signal.removeEventListener('abort',abort);uiPending.delete(id);result?.ok?resolve({ok:true}):reject(Error('Tindakan UI belum selesai.'));};
+    const abort=()=>finish(null);uiPending.set(id,{finish});signal.addEventListener('abort',abort,{once:true});timeout=setTimeout(()=>finish(null),10000);send({kind:'agent-ui',id,name,args});
+  });
+}
+async function executeAgent(name,args,signal){
+  signal.throwIfAborted();
+  if(name==='list_traffic'){
+    const list=store.list().filter(r=>(!args.domain || new URL(r.url).hostname===args.domain) && (!args.errors || r.error || r.status>=400) && (!args.query || `${r.url} ${r.method} ${r.status}`.toLowerCase().includes(args.query.toLowerCase())));
+    return {total:list.length,rows:list.slice(-80).map(r=>safeRow(r))};
+  }
+  if(name==='inspect_request'){const row=store.get(args.id);if(!row)throw Error('Request tidak ditemukan.');return safeRow(row,true);}
+  if(name==='filter_traffic' || name==='select_request' || name==='set_display'){
+    if(name==='select_request' && !store.get(args.id))throw Error('Request tidak ditemukan.');return agentUi(name,args,signal);
+  }
+  if(name==='control_capture'){if(args.action==='reload' && !await confirmAgent('Agent ingin memuat ulang browser.', 'Halaman akan dibuka ulang.',signal))return {cancelled:true};return {capturing:await actions.control(args.action)};}
+  if(name==='open_browser'){const url=validUrl(args.url);if(!await confirmAgent('Agent ingin membuka website.',url,signal))return {cancelled:true};await actions.open(url);return {opened:true};}
+  if(name==='prepare_replay'){await agentUi(name,replayData(args),signal);return {prepared:true,sent:false};}
+  if(name==='replay_request'){
+    const data=replayData(args);if(!await confirmAgent(`Agent ingin mengirim ${data.method}.`,`${data.url}\n\nHEADERS\n${data.headers.slice(0,12000)}\n\nBODY\n${data.body.slice(0,12000)}\n\nRequest memakai data asli dari perangkat. Periksa sebelum menyetujui.`,signal))return {cancelled:true};
+    const id=await actions.replay(data,AGENT_APPROVED);return id?{id,result:safeRow(store.get(id),true)}:{cancelled:true};
+  }
+  if(name==='copy_curl'){return {copied:await actions.copy(args.id,'curl')};}
+  if(name==='export_har')return {exported:await actions.export(false)};
+  if(name==='clear_traffic'){if(!await confirmAgent('Bersihkan seluruh traffic?', 'Request yang tersimpan di sesi ini akan dihapus.',signal))return {cancelled:true};return {cleared:await actions.clear()};}
+  if(name==='check_update')return {checked:await actions.update('check')};
+  if(name==='remember'){
+    if(!args.note.trim())throw Error('Catatan kosong.');if(!await confirmAgent('Simpan ke MEMORY.md?',args.note,signal))return {cancelled:true};
+    const old=agent.config.files['MEMORY.md'],next=old+'\n\n- '+args.note.trim();if(Buffer.byteLength(next)>MAX_FILE)throw Error('MEMORY.md penuh. Edit catatan melalui pengaturan.');agent.config.files['MEMORY.md']=next;try{await agent.persist();}catch(e){agent.config.files['MEMORY.md']=old;throw e;}return {remembered:true};
+  }
+  throw Error('Alat tidak tersedia.');
+}
 app.whenReady().then(()=>{
   inspector=secureWindow({width:1440,height:920,minWidth:1000,minHeight:650,title:'Arus',autoHideMenuBar:true,backgroundColor:'#121518',icon:path.join(__dirname,'../assets/icon.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs')}});
   inspector.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   inspector.webContents.on('will-navigate',e=>e.preventDefault());
+  agent=new Agent({directory:app.getPath('userData'),safeStorage,execute:executeAgent,notify:data=>send({kind:'agent-progress',data}),context:data=>({capturing,total:store.rows.size,selected:data.selectedId?safeRow(store.get(data.selectedId),true):null})});
   setupIpc();startEngine();setupUpdates();inspector.loadFile(path.join(__dirname,'index.html'));
   inspector.on('closed',()=>{inspector=null;browser?.close();app.quit();});
 });
-app.on('before-quit',()=>engine?.kill());
+app.on('before-quit',()=>{agent?.cancel();engine?.kill();});
 app.on('window-all-closed',()=>app.quit());

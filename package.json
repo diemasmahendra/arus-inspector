@@ -1,6 +1,6 @@
 {
   "name": "arus-inspector",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A focused desktop HTTP traffic inspector",
   "main": "src/main.cjs",
   "author": "Muhammad Diemas Mahendra",
@@ -10,7 +10,7 @@
     "start": "electron .",
     "test": "node --test test/*.test.cjs",
     "test:e2e": "node test/e2e.cjs",
-    "check": "node --check src/main.cjs && node --check src/capture.cjs && node --check src/preload.cjs && node --check src/renderer.js && node --check src/engine.cjs",
+    "check": "node --check src/main.cjs && node --check src/capture.cjs && node --check src/preload.cjs && node --check src/renderer.js && node --check src/engine.cjs && node --check src/agent.cjs && node --check src/agent-ui.js",
     "dist": "electron-builder --win nsis"
   },
   "dependencies": {
