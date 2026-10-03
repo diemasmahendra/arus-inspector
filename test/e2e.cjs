@@ -15,7 +15,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
  const port=await new Promise(r=>server.listen(0,'127.0.0.1',()=>r(server.address().port)));
  let app;
  try{
-   app=await electron.launch({args:[path.join(__dirname,'..'),`--user-data-dir=${directory}`,...(process.platform==='linux'?['--no-sandbox','--disable-dev-shm-usage']:[])],env:{...process.env,NODE_EXTRA_CA_CERTS:caPath},timeout:30000});
+   app=await electron.launch({...(process.env.ARUS_E2E_EXECUTABLE?{executablePath:path.resolve(process.env.ARUS_E2E_EXECUTABLE)}:{}),args:[...(process.env.ARUS_E2E_EXECUTABLE?[]:[path.join(__dirname,'..')]),`--user-data-dir=${directory}`,...(process.platform==='linux'?['--no-sandbox','--disable-dev-shm-usage']:[])],env:{...process.env,NODE_EXTRA_CA_CERTS:caPath},timeout:30000});
    const page=await app.firstWindow();await page.waitForSelector('#open-button');
    const errors=[];page.on('pageerror',e=>errors.push(e.message));
    await until(()=>page.evaluate(async()=>(await window.arus.state()).engine==='ready'),'proxy ready');

@@ -6,7 +6,7 @@ A focused desktop HTTP / HTTPS traffic inspector for Windows. Built with Electro
 
 ## Download
 
-Get **Arus-Setup-0.1.0.exe** from [Releases](https://github.com/diemasmahendra/arus-inspector/releases). The first installer appears when the GitHub Actions build succeeds. Windows x64 is the initial supported target.
+Get **Arus-Setup-VERSION.exe** from [Releases](https://github.com/diemasmahendra/arus-inspector/releases). The first installer appears when the GitHub Actions build succeeds. Windows x64 is the initial supported target.
 
 ## Getting started
 
@@ -51,7 +51,7 @@ npm run check
 npm run dist
 ```
 
-Desktop integration tests require a graphical desktop (on headless Linux: `xvfb-run -a npm run test:e2e`). Test browsers visit local fixtures only. Traffic capture tests verify HTTP, HTTPS, rejection of untrusted upstream TLS, and clear-session behavior.
+The Windows release workflow also runs the integration tests against the packaged executable before publishing. Desktop integration tests require a graphical desktop (on headless Linux: `xvfb-run -a npm run test:e2e`). Test browsers visit local fixtures only. Traffic capture tests verify HTTP, HTTPS, rejection of untrusted upstream TLS, and clear-session behavior.
 
 ## Updates and releases
 

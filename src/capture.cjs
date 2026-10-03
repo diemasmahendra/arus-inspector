@@ -50,7 +50,7 @@ class CaptureStore {
   list() { return [...this.rows.values()].map(r => this.summary(r)); }
   get(id) { const row = this.rows.get(id); if (!row) return null; const {_bytes, ...data} = row; return data; }
   har(sensitive = false) {
-    return {log: {version: '1.2', creator: {name: 'Arus', version: '0.1.0'}, entries: [...this.rows.values()].map(r => ({
+    return {log: {version: '1.2', creator: {name: 'Arus', version: require('../package.json').version}, entries: [...this.rows.values()].map(r => ({
       startedDateTime: r.startedAt, time: r.duration || 0,
       request: {method: r.method, url: sensitive ? r.url : redactUrl(r.url), httpVersion: 'HTTP/1.1',
         headers: Object.entries(sensitive ? r.requestHeaders : redactHeaders(r.requestHeaders)).map(([name,value])=>({name,value:String(value)})),
