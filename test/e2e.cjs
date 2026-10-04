@@ -82,7 +82,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
  try{
    app=await electron.launch({...(process.env.ARUS_E2E_EXECUTABLE?{executablePath:path.resolve(process.env.ARUS_E2E_EXECUTABLE)}:{}),args:[...(process.env.ARUS_E2E_EXECUTABLE?[]:[path.join(__dirname,'..')]),`--user-data-dir=${directory}`,...(process.platform==='linux'?['--no-sandbox','--disable-dev-shm-usage']:[])],env:{...process.env,NODE_EXTRA_CA_CERTS:caPath},timeout:30000});
    const page=await app.firstWindow();await page.waitForSelector('#open-button');
-   async function workspace(name){const tab=page.locator(`[data-workspace-view="${name}"]`);if(await tab.isVisible())await tab.click();}
+   async function workspace(name){await page.evaluate(async name=>{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const tab=document.querySelector(`[data-workspace-view="${name}"]`);if(tab.getClientRects().length)tab.click();},name);}
    async function selectRow(row){await workspace('traffic');await row.click();}
    const errors=[];page.on('pageerror',e=>errors.push(e.message));
    await until(()=>page.evaluate(async()=>(await window.arus.state()).engine==='ready'),'proxy ready');
