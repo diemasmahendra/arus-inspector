@@ -1,6 +1,8 @@
 'use strict';
 const $=selector=>document.querySelector(selector);
 const api=window.arus;
+const {contentType,isForm,parseForm}=window.ArusBody;
+let bodyMode='form';
 const icon=name=>`<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="icons.svg#${name}"></use></svg>`;
 function buttonContent(name,label){return `${icon(name)}<span>${label}</span>`;}
 function setSize(value){
@@ -41,7 +43,7 @@ function render(){
 async function select(id){
   selected=id;const token=++detailToken;
   document.querySelectorAll('.traffic-row').forEach(el=>{const yes=el.dataset.id===id;el.classList.toggle('selected',yes);el.setAttribute('aria-selected',yes);});
-  const value=await act(()=>api.detail(id));if(token!==detailToken || !value)return;detail=value;renderDetail();
+  const value=await act(()=>api.detail(id));if(token!==detailToken || !value)return;detail=value;renderDetail();document.dispatchEvent(new CustomEvent('arus-request-selected'));
 }
 function headers(title,values){return `<h3 class="headers-title">${title}</h3><table class="headers-table">${Object.entries(values||{}).map(([k,v])=>`<tr><td>${escape(k)}</td><td>${escape(v)}</td></tr>`).join('')}</table>`;}
 function highlightJson(line){
@@ -72,14 +74,19 @@ function renderDetail(){
   let html='';
   if(tab==='headers')html=headers('REQUEST HEADERS',detail.requestHeaders)+headers('RESPONSE HEADERS',detail.responseHeaders);
   else if(tab==='timing')html=[['Mulai',new Date(detail.startedAt).toLocaleString('id-ID')],['Durasi total',time(detail.duration)],['Ukuran response',size(detail.size)],['Protokol',detail.protocol||'—'],['Alamat server',detail.remoteAddress||'—'],['Jenis',detail.type],['Content-Type',detail.mime||'—']].map(([k,v])=>`<div class="info-line"><span>${k}</span><strong>${escape(v)}</strong></div>`).join('');
-  else {const response=tab==='response',text=response?detail.responseBody:detail.requestBody;
+  else {const response=tab==='response',text=response?detail.responseBody:detail.requestBody;const mime=response?detail.mime:contentType(detail.requestHeaders),form=isForm(mime);
     html=`<div class="body-toolbar"><span>${response?escape(detail.mime||'RESPONSE BODY'):'REQUEST BODY'}</span>${response?`<button id="copy-body">${buttonContent('copy','Salin body')}</button>`:''}</div>`;
     if(detail.error && response)html+=`<div class="body-note">${escape(detail.error)}</div>`;
     if(detail.bodyNote && response)html+=`<div class="body-note">${escape(detail.bodyNote)}</div>`;
     if(!response && detail.requestBodyTruncated)html+='<div class="body-note">Body request dipotong pada 1 MiB.</div>';
-    html+=text?code(text):`<div class="body-note">${response && detail.status==null?'Menunggu response…':response?'Tidak ada body yang tersedia.':'Request ini tidak memiliki body.'}</div>`;
+    if(form && text){
+      html+=`<div class="body-modes" role="group" aria-label="Format body"><button data-body-mode="form" class="${bodyMode==='form'?'selected':''}">Form</button><button data-body-mode="raw" class="${bodyMode==='raw'?'selected':''}">Raw</button><span>application/x-www-form-urlencoded</span></div>`;
+      const parsed=parseForm(text);
+      html+=bodyMode==='raw'?`<pre class="code-block raw-body">${escape(text)}</pre>`:`<table class="headers-table form-table"><thead><tr><th>Field</th><th>Nilai</th></tr></thead><tbody>${parsed.entries.map(([k,v])=>`<tr><td>${escape(k)}</td><td>${escape(v)}</td></tr>`).join('')}</tbody></table>${parsed.truncated?'<div class="body-note">Tampilan Form dibatasi 500 field. Buka Raw untuk seluruh body yang tertangkap.</div>':''}`;
+    }else html+=text?code(text):`<div class="body-note">${response && detail.status==null?'Menunggu response…':response?'Tidak ada body yang tersedia.':'Request ini tidak memiliki body.'}</div>`;
   }
   $('#detail-view').innerHTML=html;
+  document.querySelectorAll('[data-body-mode]').forEach(b=>b.addEventListener('click',()=>{bodyMode=b.dataset.bodyMode;renderDetail();}));
   $('#copy-body')?.addEventListener('click',()=>copy('response'));
 }
 async function copy(kind){if(!selected)return;const ok=await act(()=>api.copy(selected,kind));if(ok)toast(kind==='curl'?'cURL disalin. Header login dan body dihilangkan.':'Disalin ke clipboard.');}
@@ -122,6 +129,7 @@ document.querySelectorAll('.dialog-close').forEach(b=>b.addEventListener('click'
 document.querySelectorAll('dialog').forEach(d=>d.addEventListener('click',e=>{if(e.target!==d)return;const r=d.getBoundingClientRect();if(e.clientX<r.left || e.clientX>r.right || e.clientY<r.top || e.clientY>r.bottom)d.close();}));
 document.addEventListener('keydown',e=>{
   if((e.ctrlKey || e.metaKey) && e.key.toLowerCase()==='k'){e.preventDefault();$('#search').focus();return;}
+  if(e.target.closest('.agent-dock'))return;
   if(e.target.matches('input,textarea,select') || document.querySelector('dialog[open]'))return;
   if(e.code==='Space'){e.preventDefault();$('#pause-button').click();}
   if(['ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();follow=false;const list=visible();if(!list.length)return;const i=list.findIndex(r=>r.id===selected), next=list[Math.max(0,Math.min(list.length-1,i+(e.key==='ArrowDown'?1:-1)))];select(next.id);document.querySelector(`[data-id="${next.id}"]`)?.scrollIntoView({block:'nearest'});}

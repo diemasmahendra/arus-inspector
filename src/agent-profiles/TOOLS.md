@@ -1,6 +1,6 @@
 # Panduan alat Arus
 - list_traffic: cari ringkasan request berdasarkan domain, pencarian, atau error.
-- inspect_request: baca header dan JSON yang telah disamarkan.
+- inspect_request: baca header, JSON, dan field form-urlencoded yang telah disamarkan.
 - filter_traffic: atur daftar traffic yang terlihat.
 - select_request: pilih request dan tab detail.
 - control_capture: pause, resume, focus browser, atau reload.

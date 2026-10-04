@@ -34,3 +34,10 @@ test('stop aborts pending provider request and releases busy state',async()=>{
  const f=await fixture({fetch:(_url,{signal})=>new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}))});
  try{const pending=f.agent.chat({text:'test'});await new Promise(r=>setTimeout(r,20));await assert.rejects(f.agent.save({}),/Tunggu/);f.agent.cancel();await assert.rejects(pending,/dihentikan/);assert.equal(f.agent.state().busy,false);}finally{await f.close();}
 });
+
+test('form bodies decode duplicates and nested JSON while masking login and signatures',()=>{
+ const {parseForm}=require('../src/body.js');const body=new URLSearchParams([['Action','UploadLog'],['note','hello + world'],['tag','one'],['tag','two'],['Signature','signature-secret'],['password','password-secret'],['log',JSON.stringify({event:'clicked',token:'nested-secret'})],['payload','<img src=x onerror="alert(1)">']]).toString();
+ assert.equal(parseForm(body).entries.find(([k])=>k==='note')[1],'hello + world');assert.equal(parseForm(body).entries.filter(([k])=>k==='tag').length,2);assert.equal(parseForm('a=1&b=2&c=3',2).truncated,true);
+ const row=safeRow({id:'form',url:'https://example.com/form',requestHeaders:{'Content-Type':'Application/X-WWW-Form-Urlencoded; charset=UTF-8'},requestBody:body},true),form=JSON.parse(row.requestBody);
+ assert.equal(form.format,'form-urlencoded');assert.equal(form.fields.find(f=>f.name==='Action').value,'UploadLog');assert.equal(form.fields.filter(f=>f.name==='tag').length,2);assert.equal(form.fields.find(f=>f.name==='log').value.event,'clicked');for(const value of ['signature-secret','password-secret','nested-secret'])assert(!row.requestBody.includes(value));assert.equal(form.fields.find(f=>f.name==='Signature').value,'[REDACTED]');
+});

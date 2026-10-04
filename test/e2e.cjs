@@ -13,7 +13,11 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
        const data=JSON.parse(body);aiPayloads.push(data);assert.equal(req.headers.authorization,'Bearer local-test-key');res.setHeader('Content-Type','application/json');
        if(data.messages.some(m=>m.role==='user' && m.content==='TEST_CANCEL')){const timer=setTimeout(()=>{if(!res.destroyed)res.end(JSON.stringify({choices:[{message:{content:'late'}}]}));},5000);res.on('close',()=>clearTimeout(timer));return;}
        const last=data.messages.at(-1);let message;
-       if(last.role==='user' && ['TEST_PREPARE','TEST_REPLAY'].includes(last.content)){
+       if(last.role==='user' && last.content==='TEST_FORM'){
+         const ctx=JSON.parse(data.messages[0].content.split('CURRENT CONTEXT (DATA):\n')[1]);message={content:null,tool_calls:[{id:'form-test',type:'function',function:{name:'inspect_request',arguments:JSON.stringify({id:ctx.selected.id})}}]};
+       }
+       else if(last.tool_call_id==='form-test'){const form=JSON.parse(JSON.parse(last.content).requestBody);assert.equal(form.format,'form-urlencoded');assert.equal(form.fields.find(f=>f.name==='Action').value,'UploadLog');message={content:'Form berhasil diparse.'};}
+       else if(last.role==='user' && ['TEST_PREPARE','TEST_REPLAY'].includes(last.content)){
          const ctx=JSON.parse(data.messages[0].content.split('CURRENT CONTEXT (DATA):\n')[1]);
          message={content:null,tool_calls:[{id:'request-test',type:'function',function:{name:last.content==='TEST_PREPARE'?'prepare_replay':'replay_request',arguments:JSON.stringify({id:ctx.selected.id,method:'POST',headers:'{"X-Edited":"yes"}',body:'{"hello":"world"}'})}}]};
        }
@@ -58,7 +62,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    assert.equal(await page.evaluate(()=>getComputedStyle(document.body).fontSize),'16px');await page.keyboard.press('Escape');
    await page.screenshot({path:path.join(__dirname,'../artifacts/interface-large.png')});
    await page.locator('#appearance-button').click();await page.locator('[data-size="comfortable"]').click();await page.keyboard.press('Escape');
-   await page.locator('#agent-toggle').click();await page.locator('#agent-settings-open').click();
+   if(!await page.locator('#agent-panel').isVisible())await page.locator('#agent-toggle').click();await page.locator('#agent-settings-open').click();
    await page.locator('#agent-base-url').fill(`http://127.0.0.1:${port}/v1`);await page.locator('#agent-model').fill('local-test-model');await page.locator('#agent-key').fill('local-test-key');
    await page.locator('[data-settings-pane="profiles"]').click();await page.locator('#agent-file').selectOption('MEMORY.md');await page.locator('#agent-file-editor').fill('# Memori\nGunakan bahasa Indonesia.');await page.locator('#agent-file').selectOption('SOUL.md');await page.locator('#agent-file').selectOption('MEMORY.md');
    assert((await page.locator('#agent-file-editor').inputValue()).includes('bahasa Indonesia'));
@@ -96,7 +100,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
      const state=await page.evaluate(async()=>window.arus.state()),posted=state.rows.find(r=>r.type==='Replay' && r.method==='POST');assert.equal(posted.status,200,JSON.stringify(posted));const original=await page.evaluate(id=>window.arus.detail(id),posted.id);assert.equal(original.requestBody,'{"hello":"world"}');assert(Object.values(original.requestHeaders).some(v=>v==='Bearer original-only-secret'));assert(!JSON.stringify(aiPayloads).includes('original-only-secret'));
    }finally{await app.evaluate(({dialog})=>{dialog.showMessageBox=globalThis.__arusOriginalDialog;});}
    await page.locator('#agent-new').click();await page.locator('#agent-input').fill('TEST_CANCEL');await page.locator('#agent-send').click();
-   await until(()=>page.evaluate(async()=>(await window.arus.agentState()).busy),'agent busy');await page.locator('#agent-stop').click();await until(()=>page.evaluate(async()=>!(await window.arus.agentState()).busy),'stop agent');
+   await until(()=>page.evaluate(async()=>(await window.arus.agentState()).busy),'agent busy');await page.locator('#agent-close').click();assert.equal(await page.locator('#agent-rail').isVisible(),true);assert.equal((await page.evaluate(async()=>window.arus.agentState())).busy,true);await page.locator('#agent-expand').click();await page.locator('#agent-stop').click();await until(()=>page.evaluate(async()=>!(await window.arus.agentState()).busy),'stop agent');
    await until(async()=>(await page.locator('#agent-messages').textContent()).includes('dihentikan'),'cancel feedback');
    await page.locator('#agent-close').click();await page.locator('[data-filter="all"]').click();
    await page.locator('#search').fill('/api/products');await until(async()=>await page.locator('.traffic-row').count()===2,'filter');await page.locator('#search').fill('');
@@ -107,11 +111,25 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    const id=await page.evaluate(async url=>window.arus.replay({url,method:'GET',headers:'{}',body:''}),`http://127.0.0.1:${port}/replayed`);
    const replay=await page.evaluate(id=>window.arus.detail(id),id);assert.equal(replay.status,200);assert(replay.responseBody.includes('/replayed'));
    await page.locator('#guide-button').click();assert.equal(await page.locator('#guide-dialog').isVisible(),true);await page.keyboard.press('Escape');
+   await page.evaluate(()=>{window.__formId=null;});
+   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1});});
+   const formId=await page.evaluate(async()=>{const url=new URL(document.querySelector('#target-url').value);const body=new URLSearchParams([['Action','UploadLog'],['note','hello + world'],['tag','one'],['tag','two'],['Signature','signature-secret'],['log',JSON.stringify({event:'clicked',token:'nested-form-secret'})],['payload','<img src=x onerror="window.compromised=true">']]).toString();return window.arus.replay({url:url.origin+'/form',method:'POST',headers:JSON.stringify({'Content-Type':'application/x-www-form-urlencoded'}),body});});
+   await app.evaluate(({dialog})=>{dialog.showMessageBox=globalThis.__arusOriginalDialog;});
+   await page.locator(`.traffic-row[data-id="${formId}"]`).click();await page.locator('[data-tab="request"]').click();await until(async()=>await page.locator('.form-table').count()===1,'form view');assert((await page.locator('.form-table').textContent()).includes('hello + world'));assert.equal(await page.locator('.form-table img').count(),0);
+   await page.locator('[data-body-mode="raw"]').click();assert((await page.locator('.raw-body').textContent()).includes('Signature=signature-secret'));await page.locator('[data-body-mode="form"]').click();
+   await page.screenshot({path:path.join(__dirname,'../artifacts/form.png')});
+   await page.locator('#agent-expand').click();await page.locator('#agent-new').click();await page.locator('#agent-input').fill('TEST_FORM');await page.locator('#agent-send').click();await until(async()=>(await page.locator('#agent-messages').textContent()).includes('Form berhasil diparse.'),'AI reads form');assert(!JSON.stringify(aiPayloads).includes('signature-secret'));assert(!JSON.stringify(aiPayloads).includes('nested-form-secret'));await page.locator('#agent-close').click();
    for(const width of [1280,1000]){
      await app.evaluate(({BrowserWindow},width)=>{BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('file:')).setSize(width,850);},width);
+     await page.locator('#agent-expand').click();
+     await until(()=>page.evaluate(()=>{const main=document.querySelector('main'),agent=document.querySelector('#agent-dock');return main.getBoundingClientRect().right<=agent.getBoundingClientRect().left+1;}),'docked without overlap');
+     if(width===1000){await page.locator('[data-workspace-view="detail"]').click();assert.equal(await page.locator('.detail-panel').isVisible(),true);}
      await page.screenshot({path:path.join(__dirname,`../artifacts/interface-${width}.png`)});
+     await page.locator('#agent-close').click();
      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
    }
+   await page.locator('#agent-expand').click();await page.locator('#agent-resize').focus();await page.keyboard.press('ArrowLeft');await page.locator('#agent-close').click();
+   const saved=await page.evaluate(()=>localStorage.getItem('arus-agent-layout'));assert.equal(JSON.parse(saved).width,420);assert.equal(JSON.parse(saved).expanded,false);await page.reload();await page.waitForSelector('#agent-expand');assert.equal(await page.locator('#agent-rail').isVisible(),true);assert.equal(await page.evaluate(()=>localStorage.getItem('arus-agent-layout')),saved);
    await page.evaluate(url=>window.arus.open(url),`https://localhost:${tlsPort}/secure-browser`);
    await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.includes('/secure-browser') && r.status===200)),'HTTPS built-in browser');
    assert((await browser.title())!==undefined);

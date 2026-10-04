@@ -8,7 +8,7 @@ Only the trusted inspector's main frame can call IPC. The capture browser has no
 
 AI requests use an independent connection, no capture-browser cookies, no proxy CA trust exceptions, and no redirects. Remote provider endpoints require HTTPS; loopback HTTP is permitted. API keys are encrypted with Electron safeStorage where secure storage is available, otherwise kept only in memory. The API key itself is not returned through IPC. Markdown imports are restricted to five selected names and bounded sizes. Exporting profiles requires a directory picker and confirmation before overwriting existing files.
 
-Traffic bodies are treated as untrusted data. Known sensitive header/query/JSON fields are masked; non-JSON bodies are omitted. This is heuristic masking, not a guarantee that all personal data or unexpected secrets are removed. User prompts and profile contents are sent as entered. Users must review provider settings, traffic, and exports before sharing them.
+Traffic bodies are treated as untrusted data. Known sensitive header/query/JSON fields are masked; form-urlencoded fields are decoded and masked alongside JSON; other body formats are omitted. This is heuristic masking, not a guarantee that all personal data or unexpected secrets are removed. User prompts and profile contents are sent as entered. Users must review provider settings, traffic, and exports before sharing them.
 
 ## Known dependency advisory (checked 2026-10-03 UTC)
 
