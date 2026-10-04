@@ -29,6 +29,8 @@ To connect another browser: open **Panduan**, set its HTTP and HTTPS proxy to th
 - HAR export. Standard export redacts known sensitive headers and query parameters, omits bodies. Full export requires confirmation. Review any export before sharing: arbitrary headers and URL path segments can contain sensitive data.
 - GitHub Releases update checks, download progress, and restart-to-install.
 - AI chat and controlled application tools, with five editable Markdown profiles.
+- Task plans and progress, pause/resume, manual browser handoff, and repeated-error/observation detection.
+- Side-by-side request comparison: summary, headers, JSON fields, form fields, and text.
 - Offline Geist fonts, Lucide icons, and three display sizes.
 
 ## Privacy and limits
@@ -101,6 +103,18 @@ Provider settings and profiles remain in Electron's per-user application-data fo
 ## Readability
 
 Geist Sans, Geist Mono, and selected Lucide icons are bundled for offline use. **Tampilan** offers Ringkas, Nyaman (default), and Besar, remembered locally. The agent occupies a docked column on the right, with Chat and Pengaturan tabs. Drag its separator (or use Left/Right while focused) to resize; minimize to a 48px rail without stopping the agent. Width and expanded state are saved locally. On narrow workspaces, Traffic and Detail request tabs preserve readable content instead of overlapping panels.
+
+## Task controls
+
+The agent can create a plan with up to eight steps and update its progress while tools run. **Jeda** saves a checkpoint; **Ambil alih** pauses the agent and brings the browser forward for manual work. Use **Lanjutkan tugas** (or **Saya selesai, lanjutkan**) afterward. The agent reads the current page again and retains the original goal, completed steps, and tool results. Completed, cancelled, or uncertain identical modifying calls are blocked within that task; an action already dispatched can still finish, so verify its result before continuing.
+
+Three repeated tool errors or four identical observations pause a task with an explanation. Execution limits also produce a resumable checkpoint. Checkpoints survive reloading the inspector, but remain in memory: closing Arus, starting a new chat, or saving agent settings clears them. Resume starts a new bounded run; it does not automatically retry an interrupted action.
+
+## Compare requests
+
+Select a request, click **Pakai sebagai A**, select another request, then click **Bandingkan dengan A**. The comparison highlights added, removed, and changed fields, with options to swap A/B and show unchanged fields. Header names are compared case-insensitively. JSON is compared by field rather than formatting; form-urlencoded preserves duplicate field positions. Other bodies are compared by line.
+
+Body comparisons inspect up to 500 fields/lines and display up to 120 changed and 120 unchanged entries; long displayed values are clipped, while equality uses the full captured value. Capture truncation is indicated. The local comparison uses captured values, including raw headers. The agent's `compare_requests` tool receives masked values instead; hidden values cannot be fully compared by the model.
 
 ## Form bodies
 

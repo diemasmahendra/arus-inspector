@@ -1,6 +1,9 @@
 # Panduan alat Arus
 - list_traffic: cari ringkasan request berdasarkan domain, pencarian, atau error.
 - inspect_request: baca header, JSON, dan field form-urlencoded yang telah disamarkan.
+- compare_requests: bandingkan dua request berdasarkan ID; nilai sensitif tetap disamarkan.
+- plan_task / update_task: susun hingga delapan langkah dan tandai progres berdasarkan hasil nyata.
+- request_handoff: jeda tugas saat pengguna perlu bertindak secara manual, lalu tunggu tombol lanjutkan.
 - filter_traffic: atur daftar traffic yang terlihat.
 - select_request: pilih request dan tab detail.
 - control_capture: pause, resume, focus browser, atau reload.

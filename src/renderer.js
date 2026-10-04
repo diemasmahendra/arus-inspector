@@ -45,7 +45,7 @@ function render(){
 async function select(id){
   selected=id;const token=++detailToken;
   document.querySelectorAll('.traffic-row').forEach(el=>{const yes=el.dataset.id===id;el.classList.toggle('selected',yes);el.setAttribute('aria-selected',yes);});
-  const value=await act(()=>api.detail(id));if(token!==detailToken || !value)return;detail=value;renderDetail();document.dispatchEvent(new CustomEvent('arus-request-selected'));
+  const value=await act(()=>api.detail(id));if(token!==detailToken || !value)return;detail=value;renderDetail();document.dispatchEvent(new CustomEvent('arus-request-selected',{detail:{id:detail.id,url:detail.url,method:detail.method}}));
 }
 function headers(title,values){return `<h3 class="headers-title">${title}</h3><table class="headers-table">${Object.entries(values||{}).map(([k,v])=>`<tr><td>${escape(k)}</td><td>${escape(v)}</td></tr>`).join('')}</table>`;}
 function highlightJson(line){
@@ -153,7 +153,7 @@ if(api){api.onEvent(async event=>{
     }catch{await api.agentUiResult(event.id,{ok:false});}
   }
   else if(event.kind==='batch'){let refresh=false;for(const item of event.data){if(item.kind==='upsert'){rows.set(item.data.id,item.data);if(item.data.id===selected)refresh=true;}else if(item.kind==='remove')rows.delete(item.data);}schedule();if(refresh)select(selected);}
-  else if(event.kind==='clear'){rows.clear();selected=null;detail=null;detailToken++;$('#detail-content').hidden=true;$('#detail-empty').hidden=false;render();}
+  else if(event.kind==='clear'){document.dispatchEvent(new Event('arus-traffic-clear'));rows.clear();selected=null;detail=null;detailToken++;$('#detail-content').hidden=true;$('#detail-empty').hidden=false;render();}
   else if(event.kind==='status')applyState(event.data);
   else if(event.kind==='notice')toast(event.data);
 });act(async()=>{const state=await api.state();state.rows.forEach(r=>rows.set(r.id,r));$('#version').textContent=`v${state.version}`;applyState(state);render();});}

@@ -7,6 +7,7 @@ const {Agent, FILES, MAX_FILE, safeRow} = require('./agent.cjs');
 const {CamoufoxBrowser}=require('./camoufox.cjs');
 const {BrowserTabs}=require('./browser-tabs.cjs');
 const {BrowserAgent}=require('./browser-agent.cjs');
+const {compareRequests}=require('./compare.cjs');
 const {embeddedAdapter,camoufoxAdapter}=require('./browser-drivers.cjs');
 let browserAgent;
 const AGENT_APPROVED=Symbol('agent-approved');
@@ -78,6 +79,8 @@ function setupIpc() {
   handle('agent-save',data=>agent.save(data));
   handle('agent-chat',data=>agent.chat(data));
   handle('agent-cancel',()=>agent.cancel());
+  handle('agent-pause',kind=>agent.pause(kind));
+  handle('agent-resume',()=>{if(agent.controller)throw Error('Agent sedang bekerja.');browserAgent.refs.clear();return agent.resume();});
   handle('agent-reset',()=>agent.reset());
   handle('agent-import',async()=>{
     const {canceled,filePaths}=await dialog.showOpenDialog(inspector,{title:'Import arahan agent',properties:['openFile','multiSelections'],filters:[{name:'Markdown',extensions:['md']}]});
@@ -110,6 +113,7 @@ function setupIpc() {
   handle('clear',()=>{store.clear();engine?.postMessage({kind:'clear',epoch:store.generation});return true;});
   handle('certificate',async()=>{await enginePromise;const {canceled,filePath}=await dialog.showSaveDialog(inspector,{defaultPath:'Arus-Root-CA.crt',filters:[{name:'Certificate',extensions:['crt']}]});if(canceled)return false;await fs.writeFile(filePath,rootCertificate.toString());return true;});
   handle('detail',id=>store.get(id));
+  handle('compare',(leftId,rightId)=>{if(typeof leftId!=='string'||typeof rightId!=='string'||leftId.length>100||rightId.length>100)throw Error('Request tidak valid.');const a=store.get(leftId),b=store.get(rightId);if(!a||!b)throw Error('Request sudah tidak tersedia. Pilih ulang request A dan B.');return compareRequests(a,b);});
   handle('copy',async (id,kind)=>{
     const row=store.get(id);if(!row) throw new Error('Request sudah tidak tersedia.');
     let value;
@@ -175,6 +179,7 @@ function agentUi(name,args,signal){
 }
 async function executeAgent(name,args,signal){
   signal.throwIfAborted();
+  if(name==='compare_requests'){const a=store.get(args.leftId),b=store.get(args.rightId);if(!a||!b)throw Error('Request tidak ditemukan.');return {comparison:compareRequests(safeRow(a,true),safeRow(b,true)),note:'Field sensitif disamarkan; nilai tersembunyi tidak dapat dibandingkan secara penuh.'};}
   if(name.startsWith('browser_'))return browserAgent.run(name,args,signal);
   if(name==='list_traffic'){
     const list=store.list().filter(r=>(!args.domain || new URL(r.url).hostname===args.domain) && (!args.errors || r.error || r.status>=400) && (!args.query || `${r.url} ${r.method} ${r.status}`.toLowerCase().includes(args.query.toLowerCase())));
