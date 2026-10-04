@@ -4,8 +4,10 @@ const {X509Certificate,randomUUID} = require('node:crypto');
 const fs = require('node:fs/promises');
 const {CaptureStore, validUrl, isText, clip, curl, replayHeaders, MAX_BODY} = require('./capture.cjs');
 const {Agent, FILES, MAX_FILE, safeRow} = require('./agent.cjs');
+const {CamoufoxBrowser}=require('./camoufox.cjs');
 const AGENT_APPROVED=Symbol('agent-approved');
 const actions = {}; const uiPending = new Map(); let agent;
+let camoufox,browserKind='embedded',quitting=false;
 let inspector, browser, capturing = true, updater, updateState = {status:'idle'};
 let pending = [], timer, engine, enginePort, rootCertificate, enginePromise, engineState = 'starting';
 function startEngine() {
@@ -30,7 +32,7 @@ const store = new CaptureStore((kind, data) => {
   if (kind === 'clear') { pending = []; send({kind}); return; }
   pending.push({kind,data}); if (!timer) timer = setTimeout(() => {send({kind:'batch',data:pending}); pending=[];timer=null;}, 80);
 });
-function status() { send({kind:'status', data:{capturing, browserOpen:!!browser, engine:engineState, port:enginePort, update:updateState}}); }
+function status() { send({kind:'status', data:{capturing, browserOpen:!!browser || !!camoufox?.isOpen, browserKind, camoufox:camoufox?.state || 'idle', engine:engineState, port:enginePort, update:updateState}}); }
 function secureWindow(options) { return new BrowserWindow({...options, webPreferences:{contextIsolation:true, nodeIntegration:false, sandbox:true, ...options.webPreferences}}); }
 function setupUpdates() {
   if (!app.isPackaged) { updateState={status:'development'}; return; }
@@ -46,6 +48,20 @@ function setupUpdates() {
     updater.on('error', ()=>set({status:'error',message:'Tidak bisa memeriksa pembaruan. Coba lagi nanti.'}));
     setTimeout(()=>updater.checkForUpdates().catch(()=>{}), 8000);
   } catch { updateState={status:'error',message:'Updater tidak tersedia.'}; }
+}
+function configureCaptureWindow(win) {
+  const wc=win.webContents;
+  wc.on('will-prevent-unload',event=>event.preventDefault());
+  function allowed(next){if(next==='about:blank')return true;try{validUrl(next);return true;}catch{return false;}}
+  // Let Chromium create the real child window so opener, postMessage and form targets work.
+  wc.setWindowOpenHandler(({url})=>allowed(url)?{
+    action:'allow',outlivesOpener:false,
+    overrideBrowserWindowOptions:{title:'Arus Browser',autoHideMenuBar:true,backgroundColor:'#ffffff',frame:true,minWidth:400,minHeight:320,
+      webPreferences:{partition:'arus-capture',contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:false}}
+  }:{action:'deny'});
+  wc.on('did-create-window',child=>configureCaptureWindow(child));
+  wc.on('will-navigate',(event,next)=>{if(!allowed(next))event.preventDefault();});
+  wc.on('will-redirect',(event,next)=>{if(!allowed(next))event.preventDefault();});
 }
 async function makeBrowser(url) {
   if (browser && !browser.isDestroyed()) { browser.show(); await browser.loadURL(url); return; }
@@ -65,9 +81,7 @@ async function makeBrowser(url) {
   wc.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
   wc.session.setPermissionCheckHandler(()=>false);
   wc.session.on('will-download', event=>event.preventDefault());
-  wc.setWindowOpenHandler(({url:next})=>{ try {const target=validUrl(next); win.loadURL(target).catch(()=>{});} catch {} return {action:'deny'}; });
-  wc.on('will-navigate', (event, next)=> {try {validUrl(next);} catch {event.preventDefault();}});
-  wc.on('will-redirect', (event, next)=> {try {validUrl(next);} catch {event.preventDefault();}});
+  configureCaptureWindow(win);
   win.on('closed',()=>{browser=null;store.ids.clear();status();});
   status(); await win.loadURL(url);
 }
@@ -95,13 +109,20 @@ function setupIpc() {
     const directory=filePaths[0];for(const name of FILES){try{await fs.access(path.join(directory,name));const {response}=await dialog.showMessageBox(inspector,{buttons:['Batal','Timpa file'],defaultId:0,cancelId:0,message:'Folder ini sudah memiliki file arahan. Timpa lima file Markdown?'});if(response!==1)return false;break;}catch{}}
     for(const name of FILES)await fs.writeFile(path.join(directory,name),agent.config.files[name]);return true;
   });
-  handle('state',()=>({rows:store.list(),capturing,browserOpen:!!browser,engine:engineState,port:enginePort,version:app.getVersion(),update:updateState}));
-  handle('open',async url=>{await enginePromise;await makeBrowser(validUrl(url));return true;});
-  handle('control', action=>{
+  handle('state',()=>({rows:store.list(),capturing,browserOpen:!!browser || !!camoufox?.isOpen,browserKind,camoufox:camoufox?.state || 'idle',engine:engineState,port:enginePort,version:app.getVersion(),update:updateState}));
+  handle('open',async (input,kind=browserKind)=>{
+    const url=validUrl(input);if(!['embedded','camoufox'].includes(kind))throw Error('Browser tidak dikenal.');await enginePromise;
+    if(kind==='camoufox'){browser?.destroy();browserKind=kind;status();await camoufox.open(url,enginePort);}
+    else{await camoufox.close();browserKind=kind;await makeBrowser(url);}
+    status();return true;
+  });
+  handle('control', async action=>{
     if(action==='pause') capturing=false;
     else if(action==='resume') capturing=true;
-    else if(action==='focus') browser?.show();
-    else if(action==='reload') browser?.webContents.reload();
+    else if(['focus','reload','close'].includes(action)){
+      if(browserKind==='camoufox')await camoufox.control(action);
+      else if(action==='focus')browser?.show();else if(action==='reload')browser?.webContents.reload();else browser?.destroy();
+    }
     else throw new Error('Kontrol tidak dikenal.');
     if(action==='pause' || action==='resume') engine?.postMessage({kind:'capture',active:capturing});
     status();return capturing;
@@ -204,8 +225,13 @@ app.whenReady().then(()=>{
   inspector.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   inspector.webContents.on('will-navigate',e=>e.preventDefault());
   agent=new Agent({directory:app.getPath('userData'),safeStorage,execute:executeAgent,notify:data=>send({kind:'agent-progress',data}),context:data=>({capturing,total:store.rows.size,selected:data.selectedId?safeRow(store.get(data.selectedId),true):null})});
+  camoufox=new CamoufoxBrowser({directory:app.getPath('userData'),notify:status});
   setupIpc();startEngine();setupUpdates();inspector.loadFile(path.join(__dirname,'index.html'));
   inspector.on('closed',()=>{inspector=null;browser?.close();app.quit();});
 });
-app.on('before-quit',()=>{agent?.cancel();engine?.kill();});
+app.on('before-quit',event=>{
+  agent?.cancel();
+  if(!quitting && (camoufox?.browser || camoufox?.opening)){event.preventDefault();quitting=true;camoufox.close().catch(()=>{}).finally(()=>app.quit());return;}
+  engine?.kill();
+});
 app.on('window-all-closed',()=>app.quit());

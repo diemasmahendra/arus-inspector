@@ -9,3 +9,5 @@ Arus is an independent project and is not affiliated with HTTP Toolkit or Whistl
 Geist Sans and Geist Mono v1.7.2 (https://vercel.com/font) are distributed under the SIL Open Font License 1.1. The license is included in src/fonts/LICENSE.txt.
 
 The selected Lucide icons v1.51.0 (https://lucide.dev) are distributed under the ISC License. The copyright and license are included in src/ICON_LICENSE.txt. Icons are bundled locally in src/icons.svg.
+
+Camoufox (https://github.com/daijro/camoufox) and camoufox-js (https://github.com/apify/camoufox-js) are distributed under MPL-2.0. Arus uses the unmodified wrapper and downloads upstream browser binaries separately, preserving their bundled notices. Playwright (https://github.com/microsoft/playwright) is distributed under Apache-2.0. Source and license notices remain in the installed packages.

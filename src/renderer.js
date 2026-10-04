@@ -11,6 +11,8 @@ function setSize(value){
   document.querySelectorAll('[data-size]').forEach(b=>{const yes=b.dataset.size===value;b.classList.toggle('selected',yes);b.setAttribute('aria-checked',String(yes));});
   try{localStorage.setItem('arus-display-size',value);}catch{}
 }
+try{$('#browser-kind').value=localStorage.getItem('arus-browser-kind')||'embedded';}catch{}
+$('#browser-kind').addEventListener('change',()=>{try{localStorage.setItem('arus-browser-kind',$('#browser-kind').value);}catch{}});
 let savedSize='comfortable';try{savedSize=localStorage.getItem('arus-display-size')||savedSize;}catch{}setSize(savedSize);
 $('#appearance-button').addEventListener('click',()=>$('#appearance-dialog').showModal());
 $('.size-options').addEventListener('click',e=>{const b=e.target.closest('[data-size]');if(b)setSize(b.dataset.size);});
@@ -99,14 +101,17 @@ function applyState(state){
   $('.capture-indicator').classList.toggle('paused',!dirty);
   $('#pause-button').title=dirty?'Jeda capture (Space)':'Lanjutkan capture (Space)';
   $('#focus-browser').disabled=!state.browserOpen;
+  $('#close-browser').disabled=!state.browserOpen && !['downloading','starting'].includes(state.camoufox);
+  $('#browser-caption').textContent=state.camoufox==='downloading'?'Mengunduh Camoufox · pertama kali':state.camoufox==='starting'?'Menyiapkan Camoufox':state.browserKind==='camoufox'?'Camoufox':'Browser Arus';
   $('#footer-state').innerHTML=`<span class="dot ${dirty?'recording':''}"></span> ${dirty?'Mendengarkan traffic':'Capture dijeda · traffic tetap diteruskan'}`;
   if(state.engine){$('#engine-status').textContent=state.engine==='ready'?'Proxy siap':state.engine==='error'?'Mesin berhenti':'Menyiapkan capture';$('#engine-dot').className=`dot ${state.engine==='ready'?'recording':''}`;$('#open-button').disabled=state.engine!=='ready';}
   if(state.port){$('#proxy-address').textContent=`127.0.0.1:${state.port}`;$('#guide-proxy').textContent=`127.0.0.1:${state.port}`;}
   if(state.update){updateState=state.update;const s=updateState;$('#update-button').innerHTML=icon(s.status==='checking' || s.status==='downloading'?'loader-circle':s.status==='ready'?'check':'refresh-cw')+'<span>'+(s.status==='available'?`Update v${s.version}`:s.status==='downloading'?`Mengunduh ${s.percent}%`:s.status==='ready'?'Restart & update':s.status==='checking'?'Memeriksa…':s.status==='current'?'Versi terbaru':'Cek update')+'</span>';$('#update-button').disabled=['checking','downloading'].includes(s.status);}
 }
-$('#open-form').addEventListener('submit',async e=>{e.preventDefault();const url=$('#target-url').value.trim();if(!url){$('#target-url').focus();return;}$('#open-button').disabled=true;$('#open-button').innerHTML=buttonContent('loader-circle','Membuka…');const ok=await act(()=>api.open(url));$('#open-button').disabled=false;$('#open-button').innerHTML=buttonContent('external-link','Buka browser');if(ok)toast('Browser terhubung. Gunakan website seperti biasa untuk melihat traffic.');});
+$('#open-form').addEventListener('submit',async e=>{e.preventDefault();const url=$('#target-url').value.trim();if(!url){$('#target-url').focus();return;}$('#open-button').disabled=true;$('#open-button').innerHTML=buttonContent('loader-circle','Membuka…');const ok=await act(()=>api.open(url,$('#browser-kind').value));$('#open-button').disabled=false;$('#open-button').innerHTML=buttonContent('external-link','Buka browser');if(ok)toast('Browser terhubung. Gunakan website seperti biasa untuk melihat traffic.');});
 $('#empty-open').addEventListener('click',()=>$('#target-url').focus());
 $('#focus-browser').addEventListener('click',()=>act(()=>api.control('focus')));
+$('#close-browser').addEventListener('click',()=>act(()=>api.control('close')));
 $('#pause-button').addEventListener('click',()=>act(()=>api.control(dirty?'pause':'resume')));
 $('#clear-button').addEventListener('click',()=>act(()=>api.clear()));
 $('#search').addEventListener('input',e=>{query=e.target.value.trim().toLowerCase();schedule();});

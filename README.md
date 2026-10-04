@@ -11,7 +11,7 @@ Get **Arus-Setup-VERSION.exe** from [Releases](https://github.com/diemasmahendra
 ## Getting started
 
 1. Install and open Arus.
-2. Enter a website URL and click **Buka browser**.
+2. Enter a website URL, select **Browser Arus** or **Camoufox**, and click **Buka browser**. Camoufox downloads its separate engine from the upstream project on first use; later launches reuse it.
 3. Use that browser normally. Select a captured request to inspect its headers, body, and response.
 
 The built-in browser trusts only the local Arus capture CA within its own session. Arus does not change your system proxy or install a system certificate automatically. The upstream proxy validates server TLS certificates.
@@ -35,7 +35,7 @@ To connect another browser: open **Panduan**, set its HTTP and HTTPS proxy to th
 
 No telemetry or account is implemented. Capture records are kept in memory, bounded to 3,000 records / 48 MiB; older records are removed. Body views are limited to 1 MiB. Whistle also maintains a bounded temporary capture cache. Its generated CA/private key and settings are stored in the app's private data directory on the machine; never commit or share that directory.
 
-Pause stops recording into Arus; the proxy continues forwarding traffic. Closing Arus stops its proxy. Browser popups open in the same capture window. Downloads and device permissions are disabled in the capture browser. Browser sessions are temporary. This is a debugging browser, not a replacement for your daily browser.
+Pause stops recording into Arus; the proxy continues forwarding traffic. Closing Arus stops its proxy. Browser popups open in separate captured windows, sharing the browser session. Blank-window flows, opener communication, and links/forms targeting a new window are supported. Downloads and device permissions are disabled in the capture browser. Browser sessions are temporary. **Tutup browser** closes the selected browser without allowing pages to hold it open. Camoufox uses a separate Firefox process through camoufox-js/Playwright, with the same local capture proxy, popup session, and upstream TLS verification. HTTPS certificate exceptions are confined to its temporary capture context; no system trust or proxy changes are made. This is a debugging browser, not a replacement for your daily browser.
 
 Arus does not display WebSocket frames, SSE streams, gRPC/protobuf decoding, Android patching, or traffic that bypasses the configured proxy. Some sites reject embedded Chromium browsers. Apps using certificate pinning may reject the proxy CA.
 

@@ -44,6 +44,10 @@ jobs:
         run: npm run test:e2e
         env:
           ARUS_E2E_EXECUTABLE: dist/win-unpacked/Arus.exe
+      - name: Test Camoufox browser in packaged Windows app
+        run: npm run test:camoufox
+        env:
+          ARUS_E2E_EXECUTABLE: dist/win-unpacked/Arus.exe
       - uses: actions/upload-artifact@v4
         with:
           name: Arus-Windows-x64
