@@ -38,6 +38,8 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
  try{
    app=await electron.launch({...(process.env.ARUS_E2E_EXECUTABLE?{executablePath:path.resolve(process.env.ARUS_E2E_EXECUTABLE)}:{}),args:[...(process.env.ARUS_E2E_EXECUTABLE?[]:[path.join(__dirname,'..')]),`--user-data-dir=${directory}`,...(process.platform==='linux'?['--no-sandbox','--disable-dev-shm-usage']:[])],env:{...process.env,NODE_EXTRA_CA_CERTS:caPath},timeout:30000});
    const page=await app.firstWindow();await page.waitForSelector('#open-button');
+   async function workspace(name){const tab=page.locator(`[data-workspace-view="${name}"]`);if(await tab.isVisible())await tab.click();}
+   async function selectRow(row){await workspace('traffic');await row.click();}
    const errors=[];page.on('pageerror',e=>errors.push(e.message));
    await until(()=>page.evaluate(async()=>(await window.arus.state()).engine==='ready'),'proxy ready');
    fs.mkdirSync(path.join(__dirname,'../artifacts'),{recursive:true});
@@ -48,10 +50,10 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    assert.equal(await browser.evaluate(()=>typeof window.arus),'undefined');assert.equal(await browser.evaluate(()=>typeof require),'undefined');
    await page.bringToFront();
    await until(async()=>await page.locator('.traffic-row').count()>=8,'table rows');
-   await page.locator('.traffic-row').filter({hasText:'/api/profile'}).first().click();
+   await selectRow(page.locator('.traffic-row').filter({hasText:'/api/profile'}).first());
    await until(async()=>await page.locator('#detail-view').textContent().then(t=>t.includes('window.compromised')),'untrusted response displayed safely');
    assert.equal(await page.locator('#detail-view img').count(),0);
-   const request=page.locator('.traffic-row').filter({hasText:'/api/products'}).first();await request.click();
+   const request=page.locator('.traffic-row').filter({hasText:'/api/products'}).first();await selectRow(request);
    await until(async()=>await page.locator('#detail-view').textContent().then(t=>t.includes('Everyday notebook')),'response body');
    assert.equal(await page.evaluate(()=>window.compromised),undefined);assert.equal(await page.locator('#detail-view img').count(),0);
    await page.evaluate(()=>document.querySelector('#toast').hidden=true);
@@ -83,7 +85,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    assert.equal(await page.locator('.traffic-row .status:not(.error)').count(),0);assert((await page.locator('#detail-url').textContent()).includes('/api/missing'));assert.equal(await page.locator('#agent-panel img').count(),0);assert.equal(await page.evaluate(()=>window.compromised),undefined);
    await page.evaluate(()=>{document.querySelector('.agent-message.assistant>div').textContent='Ada request 404 pada /api/missing. Filter error sudah aktif dan requestnya sudah dipilih. Periksa path endpoint atau route server untuk memastikan URL tersedia.';});
    await page.screenshot({path:path.join(__dirname,'../artifacts/agent.png')});
-   await page.locator('#agent-close').click();await page.locator('[data-filter="all"]').click();await request.click();await page.locator('#agent-toggle').click();
+   await page.locator('#agent-close').click();await page.locator('[data-filter="all"]').click();await selectRow(request);await page.locator('#agent-toggle').click();
    await page.locator('#agent-new').click();await page.locator('#agent-input').fill('TEST_PREPARE');await page.locator('#agent-send').click();
    await until(async()=>await page.locator('#replay-dialog').isVisible(),'agent composer');assert((await page.locator('#replay-headers').inputValue()).includes('original-only-secret'));assert((await page.locator('#replay-headers').inputValue()).includes('X-Edited'));assert.equal(await page.locator('#replay-method').inputValue(),'POST');assert.equal(await page.locator('#replay-body').inputValue(),'{"hello":"world"}');await page.keyboard.press('Escape');
    await until(()=>page.evaluate(async()=>!(await window.arus.agentState()).busy),'prepare finished');
@@ -115,7 +117,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1});});
    const formId=await page.evaluate(async()=>{const url=new URL(document.querySelector('#target-url').value);const body=new URLSearchParams([['Action','UploadLog'],['note','hello + world'],['tag','one'],['tag','two'],['Signature','signature-secret'],['log',JSON.stringify({event:'clicked',token:'nested-form-secret'})],['payload','<img src=x onerror="window.compromised=true">']]).toString();return window.arus.replay({url:url.origin+'/form',method:'POST',headers:JSON.stringify({'Content-Type':'application/x-www-form-urlencoded'}),body});});
    await app.evaluate(({dialog})=>{dialog.showMessageBox=globalThis.__arusOriginalDialog;});
-   await page.locator(`.traffic-row[data-id="${formId}"]`).click();await page.locator('[data-tab="request"]').click();await until(async()=>await page.locator('.form-table').count()===1,'form view');assert((await page.locator('.form-table').textContent()).includes('hello + world'));assert.equal(await page.locator('.form-table img').count(),0);
+   await selectRow(page.locator(`.traffic-row[data-id="${formId}"]`));await page.locator('[data-tab="request"]').click();await until(async()=>await page.locator('.form-table').count()===1,'form view');assert((await page.locator('.form-table').textContent()).includes('hello + world'));assert.equal(await page.locator('.form-table img').count(),0);
    await page.locator('[data-body-mode="raw"]').click();assert((await page.locator('.raw-body').textContent()).includes('Signature=signature-secret'));await page.locator('[data-body-mode="form"]').click();
    await page.screenshot({path:path.join(__dirname,'../artifacts/form.png')});
    await page.locator('#agent-expand').click();await page.locator('#agent-new').click();await page.locator('#agent-input').fill('TEST_FORM');await page.locator('#agent-send').click();await until(async()=>(await page.locator('#agent-messages').textContent()).includes('Form berhasil diparse.'),'AI reads form');assert(!JSON.stringify(aiPayloads).includes('signature-secret'));assert(!JSON.stringify(aiPayloads).includes('nested-form-secret'));await page.locator('#agent-close').click();
@@ -133,7 +135,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    await page.evaluate(url=>window.arus.open(url),`https://localhost:${tlsPort}/secure-browser`);
    await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.includes('/secure-browser') && r.status===200)),'HTTPS built-in browser');
    assert((await browser.title())!==undefined);
-   await page.locator('#clear-button').click();await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.length===0),'clear');assert.equal(await page.locator('#detail-empty').isVisible(),true);
+   await page.locator('#clear-button').click();await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.length===0),'clear');await workspace('detail');assert.equal(await page.locator('#detail-empty').isVisible(),true);
    assert.deepEqual(errors,[]);console.log('PASS: desktop launch, Whistle IPC, HTTP/HTTPS capture, request bodies, filters, pause/resume, replay, XSS isolation, dialogs, five Markdown profiles, safe agent tools, provider redaction, stop and clear');
  }finally{if(app)await app.close();await new Promise(r=>server.close(r));await new Promise(r=>secure.close(r));fs.rmSync(directory,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});
