@@ -8,6 +8,7 @@ ipcMain.handle('browser-state',event=>owner(event).snapshot());
 ipcMain.handle('browser-action',(event,action,data)=>owner(event).action(action,data));
 function owner(event){const shell=shells.get(event.sender.id);if(!shell || event.senderFrame!==shell.win.webContents.mainFrame)throw Error('Akses ditolak.');return shell;}
 function configurePopup(wc){
+  wc.__arusAgentEpoch=0;wc.on('did-start-navigation',()=>{wc.__arusAgentEpoch++;});
   wc.setWindowOpenHandler(({url})=>allowed(url)?{action:'allow',outlivesOpener:false,overrideBrowserWindowOptions:{title:'Arus Popup',autoHideMenuBar:true,frame:true,minWidth:400,minHeight:320,webPreferences:{partition:'arus-capture',contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:false}}}:{action:'deny'});
   wc.on('did-create-window',child=>{configurePopup(child.webContents);child.webContents.on('will-prevent-unload',e=>e.preventDefault());for(const event of ['will-navigate','will-redirect'])child.webContents.on(event,(e,url)=>{if(!allowed(url))e.preventDefault();});});
 }

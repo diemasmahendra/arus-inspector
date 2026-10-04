@@ -41,3 +41,9 @@ test('form bodies decode duplicates and nested JSON while masking login and sign
  const row=safeRow({id:'form',url:'https://example.com/form',requestHeaders:{'Content-Type':'Application/X-WWW-Form-Urlencoded; charset=UTF-8'},requestBody:body},true),form=JSON.parse(row.requestBody);
  assert.equal(form.format,'form-urlencoded');assert.equal(form.fields.find(f=>f.name==='Action').value,'UploadLog');assert.equal(form.fields.filter(f=>f.name==='tag').length,2);assert.equal(form.fields.find(f=>f.name==='log').value.event,'clicked');for(const value of ['signature-secret','password-secret','nested-secret'])assert(!row.requestBody.includes(value));assert.equal(form.fields.find(f=>f.name==='Signature').value,'[REDACTED]');
 });
+
+test('browser tools validate refs, bounded waits and typed arguments',()=>{
+ assert.deepEqual(validateArgs('browser_fill',{ref:'abc',text:'hello'}),{ref:'abc',text:'hello'});
+ for(const args of [{ms:0},{ms:6000},{ms:NaN},{ms:Infinity}])assert.throws(()=>validateArgs('browser_wait',args));
+ assert.throws(()=>validateArgs('browser_click',{selector:'button'}));assert.throws(()=>validateArgs('browser_tab',{action:'close'}));assert.throws(()=>validateArgs('browser_press',{ref:'x',key:'Control+R'}));
+});

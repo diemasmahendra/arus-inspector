@@ -13,7 +13,36 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
        const data=JSON.parse(body);aiPayloads.push(data);assert.equal(req.headers.authorization,'Bearer local-test-key');res.setHeader('Content-Type','application/json');
        if(data.messages.some(m=>m.role==='user' && m.content==='TEST_CANCEL')){const timer=setTimeout(()=>{if(!res.destroyed)res.end(JSON.stringify({choices:[{message:{content:'late'}}]}));},5000);res.on('close',()=>clearTimeout(timer));return;}
        const last=data.messages.at(-1);let message;
-       if(last.role==='user' && last.content==='TEST_FORM'){
+       const call=(id,name,args={})=>({content:null,tool_calls:[{id,type:'function',function:{name,arguments:JSON.stringify(args)}}]});
+       if(last.role==='user' && last.content==='TEST_BROWSER')message=call('web-tabs','browser_tabs');
+       else if(last.tool_call_id==='web-tabs')message=call('web-read','browser_read');
+       else if(last.tool_call_id==='web-read'){
+         const result=JSON.parse(last.content);assert(!JSON.stringify(result).includes('browser-password-secret'));assert(!JSON.stringify(result).includes('browser-input-secret'));assert(result.text.includes('Browser agent fixture'));
+         const find=label=>result.elements.find(e=>e.label===label).ref;
+         message={content:null,tool_calls:[{id:'web-fill',type:'function',function:{name:'browser_fill',arguments:JSON.stringify({ref:find('Display name'),text:'Arus Agent'})}},{id:'web-select',type:'function',function:{name:'browser_select',arguments:JSON.stringify({ref:find('Plan'),value:'pro'})}},{id:'web-toggle',type:'function',function:{name:'browser_click',arguments:JSON.stringify({ref:find('Show details')})}}]};
+       }
+       else if(last.tool_call_id==='web-toggle')message=call('web-after','browser_read');
+       else if(last.tool_call_id==='web-after'){const result=JSON.parse(last.content);assert(result.text.includes('Details opened'));message=call('web-submit','browser_click',{ref:result.elements.find(e=>e.label==='Save changes').ref});}
+       else if(last.tool_call_id==='web-submit')message=call('web-wait','browser_wait',{ms:400});
+       else if(last.tool_call_id==='web-wait')message=call('web-result','browser_read');
+       else if(last.tool_call_id==='web-result'){assert(JSON.parse(last.content).url?.includes('/agent-submit'),last.content);message={content:'Browser selesai: form disimpan dan traffic diverifikasi.'};}
+       else if(last.role==='user' && last.content==='TEST_BROWSER_CANCEL')message=call('web-cancel-read','browser_read');
+       else if(last.tool_call_id==='web-cancel-read')message=call('web-cancel-click','browser_click',{ref:JSON.parse(last.content).elements.find(e=>e.label==='Show details').ref});
+       else if(last.tool_call_id==='web-cancel-click'){assert(JSON.parse(last.content).cancelled);message={content:'Klik browser dibatalkan.'};}
+       else if(last.role==='user' && last.content==='TEST_BROWSER_SECRET')message=call('web-secret-read','browser_read');
+       else if(last.tool_call_id==='web-secret-read')message=call('web-secret-fill','browser_fill',{ref:JSON.parse(last.content).elements.find(e=>e.sensitive).ref,text:'should-not-enter'});
+       else if(last.tool_call_id==='web-secret-fill'){assert(JSON.parse(last.content).error.includes('manual'));message={content:'Kolom sensitif harus diisi manual.'};}
+       else if(last.role==='user' && last.content==='TEST_BROWSER_FRAME')message=call('web-frame-root','browser_read');
+       else if(last.tool_call_id==='web-frame-root'){const r=JSON.parse(last.content);message=call('web-frame-read','browser_read',{frameId:r.frames.find(f=>f.url.includes('/agent-frame')).id});}
+       else if(last.tool_call_id==='web-frame-read'){const r=JSON.parse(last.content);assert(r.text.includes('Frame fixture'));message=call('web-frame-fill','browser_fill',{ref:r.elements.find(e=>e.label==='Frame name').ref,text:'Frame Agent'});}
+       else if(last.tool_call_id==='web-frame-fill')message={content:'Frame berhasil diisi.'};
+       else if(last.role==='user' && last.content==='TEST_BROWSER_MORE')message=call('more-tabs','browser_tabs');
+       else if(last.tool_call_id==='more-tabs')message=call('more-new','browser_tab',{action:'new'});
+       else if(last.tool_call_id==='more-new'){const tabs=JSON.parse(last.content).tabs;message=call('more-select','browser_tab',{action:'select',tabId:tabs.find(t=>t.url.endsWith('/agent-page')).id});}
+       else if(last.tool_call_id==='more-select')message=call('more-read','browser_read');
+       else if(last.tool_call_id==='more-read'){const ref=JSON.parse(last.content).elements.find(e=>e.label==='Shadow name').ref;message={content:null,tool_calls:[{id:'more-shadow',type:'function',function:{name:'browser_fill',arguments:JSON.stringify({ref,text:'Shadow Agent'})}},{id:'more-key',type:'function',function:{name:'browser_press',arguments:JSON.stringify({ref,key:'Tab'})}},{id:'more-scroll',type:'function',function:{name:'browser_scroll',arguments:'{"direction":"down","amount":600}'}},{id:'more-close',type:'function',function:{name:'browser_tab',arguments:JSON.stringify({action:'close',tabId:JSON.parse(data.messages.find(m=>m.tool_call_id==='more-new').content).created})}}]};}
+       else if(last.tool_call_id==='more-close')message={content:'Tab, shadow DOM, keyboard, dan scroll selesai.'};
+       else if(last.role==='user' && last.content==='TEST_FORM'){
          const ctx=JSON.parse(data.messages[0].content.split('CURRENT CONTEXT (DATA):\n')[1]);message={content:null,tool_calls:[{id:'form-test',type:'function',function:{name:'inspect_request',arguments:JSON.stringify({id:ctx.selected.id})}}]};
        }
        else if(last.tool_call_id==='form-test'){const form=JSON.parse(JSON.parse(last.content).requestBody);assert.equal(form.format,'form-urlencoded');assert.equal(form.fields.find(f=>f.name==='Action').value,'UploadLog');message={content:'Form berhasil diparse.'};}
@@ -28,6 +57,9 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
        aiCalls++;res.end(JSON.stringify({choices:[{message}]}));
      });return;
    }
+   if(req.url==='/agent-page'){res.setHeader('Content-Type','text/html');res.end(`<!doctype html><title>Browser agent fixture</title><h1>Browser agent fixture</h1><form action="/agent-submit"><label>Display name<input name="display" value="browser-input-secret"></label><label>Plan<select name="plan"><option value="free">Free</option><option value="pro">Pro</option></select></label><label>Password<input id="agent-password" type="password" value="browser-password-secret"></label><button type="button" onclick="document.querySelector('#details').hidden=false">Show details</button><p id="details" hidden>Details opened</p><button>Save changes</button></form><iframe src="http://localhost:${server.address().port}/agent-frame"></iframe><div id="shadow"></div><script>document.querySelector('#shadow').attachShadow({mode:'open'}).innerHTML='<label>Shadow name<input></label>';</script>`);return;}
+   if(req.url==='/agent-frame'){res.setHeader('Content-Type','text/html');res.end('<h1>Frame fixture</h1><label>Frame name<input></label>');return;}
+   if(req.url.startsWith('/agent-submit')){res.setHeader('Content-Type','text/html');res.end('<h1>Saved changes</h1>');return;}
    if(req.url==='/'){res.setHeader('Content-Type','text/html');res.end(`<!doctype html><title>Arus test store</title><h1>Arus local test</h1><script>Promise.all(['/api/products','/api/profile','/api/orders','/api/categories','/api/notifications','/api/config','/api/missing'].map(url=>fetch(url,url==='/api/products'?{headers:{Authorization:'Bearer original-only-secret'}}:{}))).then(()=>fetch('/api/cart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({productId:42,quantity:2})}));</script>`);return;}
    res.setHeader('Content-Type','application/json');res.setHeader('X-Arus-Test','true');
    if(req.url==='/api/missing')res.statusCode=404;
@@ -157,6 +189,23 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    await page.locator('[data-body-mode="raw"]').click();assert((await page.locator('.raw-body').textContent()).includes('Signature=signature-secret'));await page.locator('[data-body-mode="form"]').click();
    await page.screenshot({path:path.join(__dirname,'../artifacts/form.png')});
    await page.locator('#agent-expand').click();await page.locator('#agent-new').click();await page.locator('#agent-input').fill('TEST_FORM');await page.locator('#agent-send').click();await until(async()=>(await page.locator('#agent-messages').textContent()).includes('Form berhasil diparse.'),'AI reads form');assert(!JSON.stringify(aiPayloads).includes('signature-secret'));assert(!JSON.stringify(aiPayloads).includes('nested-form-secret'));await page.locator('#agent-close').click();
+   await page.evaluate(url=>window.arus.open(url),`http://127.0.0.1:${port}/agent-page`);
+   await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.endsWith('/agent-page')&&r.status===200)),'agent browser fixture');
+   let agentPage;await until(async()=>{agentPage=(await app.windows()).find(w=>w.url().endsWith('/agent-page'));return !!agentPage;},'agent page attaches');
+   await page.locator('#agent-expand').click();
+   async function browserChat(text,answer){await page.locator('#agent-new').click();await page.locator('#agent-input').fill(text);await page.locator('#agent-send').click();try{await until(async()=>(await page.locator('#agent-messages').textContent()).includes(answer),text);}catch(e){throw Error(e.message+' '+await page.locator('#agent-messages').textContent());}await until(()=>page.evaluate(async()=>!(await window.arus.agentState()).busy),'browser agent idle');}
+   await app.evaluate(({dialog})=>{globalThis.__browserConfirms=0;dialog.showMessageBox=async()=>{globalThis.__browserConfirms++;return {response:0};};});
+   await browserChat('TEST_BROWSER_CANCEL','Klik browser dibatalkan.');assert.equal(await agentPage.locator('#details').isVisible(),false);assert.equal(await app.evaluate(()=>globalThis.__browserConfirms),1);
+   await browserChat('TEST_BROWSER_SECRET','Kolom sensitif harus diisi manual.');assert.equal(await agentPage.locator('#agent-password').inputValue(),'browser-password-secret');
+   await browserChat('TEST_BROWSER_FRAME','Frame berhasil diisi.');assert.equal(await agentPage.frameLocator('iframe').locator('input').inputValue(),'Frame Agent');
+   await app.evaluate(({dialog})=>{globalThis.__browserConfirms=0;dialog.showMessageBox=async()=>{globalThis.__browserConfirms++;return {response:1};};});
+   await browserChat('TEST_BROWSER','Browser selesai: form disimpan');assert.equal(await app.evaluate(()=>globalThis.__browserConfirms),2);
+   await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.includes('/agent-submit?display=Arus+Agent&plan=pro')&&r.status===200)),'AI form traffic capture');
+   assert(!JSON.stringify(aiPayloads).includes('browser-password-secret'));assert(!JSON.stringify(aiPayloads).includes('browser-input-secret'));
+   await app.evaluate(({dialog})=>{dialog.showMessageBox=globalThis.__arusOriginalDialog;});await page.locator('#agent-close').click();
+   await page.evaluate(url=>window.arus.open(url),`http://127.0.0.1:${port}/agent-page`);await until(async()=>(await app.windows()).filter(w=>w.url().endsWith('/agent-page')).length===1,'fresh agent page');
+   const freshAgent=(await app.windows()).find(w=>w.url().endsWith('/agent-page'));await page.locator('#agent-expand').click();await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1});});
+   await browserChat('TEST_BROWSER_MORE','Tab, shadow DOM, keyboard, dan scroll selesai.');assert.equal(await freshAgent.locator('#shadow input').inputValue(),'Shadow Agent');await app.evaluate(({dialog})=>{dialog.showMessageBox=globalThis.__arusOriginalDialog;});await page.locator('#agent-close').click();
    for(const width of [1280,1000]){
      await app.evaluate(({BrowserWindow},width)=>{BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/index.html')).setSize(width,850);},width);
      await page.locator('#agent-expand').click();
@@ -175,6 +224,6 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    browser.on('dialog',dialog=>dialog.dismiss().catch(()=>{}));
    await browser.evaluate(()=>{window.onbeforeunload=()=>false;});
    await page.locator('#close-browser').click();await until(()=>page.evaluate(async()=>!(await window.arus.state()).browserOpen),'browser closes despite beforeunload');
-   assert.deepEqual(errors,[]);console.log('PASS: desktop launch, Whistle IPC, HTTP/HTTPS capture, browser tabs/history, popup opener/session/form capture, request bodies, filters, pause/resume, replay, XSS isolation, dialogs, five Markdown profiles, safe agent tools, provider redaction, stop and clear');
+   assert.deepEqual(errors,[]);console.log('PASS: desktop launch, Whistle IPC, HTTP/HTTPS capture, browser tabs/history, popup opener/session/form capture, request bodies, filters, pause/resume, replay, XSS isolation, dialogs, five Markdown profiles, safe agent tools, browser AI form/iframe/shadow/tab/keyboard/scroll controls, provider redaction, stop and clear');
  }catch(error){console.error('Desktop test failure:',error);throw error;}finally{if(app)await app.close();server.closeAllConnections();secure.closeAllConnections();await new Promise(r=>server.close(r));await new Promise(r=>secure.close(r));fs.rmSync(directory,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

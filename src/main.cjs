@@ -6,6 +6,9 @@ const {CaptureStore, validUrl, isText, clip, curl, replayHeaders, MAX_BODY} = re
 const {Agent, FILES, MAX_FILE, safeRow} = require('./agent.cjs');
 const {CamoufoxBrowser}=require('./camoufox.cjs');
 const {BrowserTabs}=require('./browser-tabs.cjs');
+const {BrowserAgent}=require('./browser-agent.cjs');
+const {embeddedAdapter,camoufoxAdapter}=require('./browser-drivers.cjs');
+let browserAgent;
 const AGENT_APPROVED=Symbol('agent-approved');
 const actions = {}; const uiPending = new Map(); let agent;
 let camoufox,browserKind='embedded',quitting=false;
@@ -161,7 +164,7 @@ function replayData(args){
   return {url:validUrl(args.url===undefined?row.url:args.url),method,headers:JSON.stringify(replayHeaders(edited),null,2),body:args.body===undefined?row.requestBody:args.body};
 }
 async function confirmAgent(message,detail,signal){
-  signal.throwIfAborted();const {response}=await dialog.showMessageBox(inspector,{type:'question',buttons:['Batal','Setujui'],defaultId:0,cancelId:0,message,detail});signal.throwIfAborted();return response===1;
+  signal.throwIfAborted();const {response}=await dialog.showMessageBox(inspector,{type:'question',buttons:['Batal','Setujui'],defaultId:0,cancelId:0,message,detail,signal});signal.throwIfAborted();return response===1;
 }
 function agentUi(name,args,signal){
   signal.throwIfAborted();return new Promise((resolve,reject)=>{
@@ -172,6 +175,7 @@ function agentUi(name,args,signal){
 }
 async function executeAgent(name,args,signal){
   signal.throwIfAborted();
+  if(name.startsWith('browser_'))return browserAgent.run(name,args,signal);
   if(name==='list_traffic'){
     const list=store.list().filter(r=>(!args.domain || new URL(r.url).hostname===args.domain) && (!args.errors || r.error || r.status>=400) && (!args.query || `${r.url} ${r.method} ${r.status}`.toLowerCase().includes(args.query.toLowerCase())));
     return {total:list.length,rows:list.slice(-80).map(r=>safeRow(r))};
@@ -201,8 +205,9 @@ app.whenReady().then(()=>{
   inspector=secureWindow({width:1440,height:920,minWidth:1000,minHeight:650,title:'Arus',autoHideMenuBar:true,backgroundColor:'#121518',icon:path.join(__dirname,'../assets/icon.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs')}});
   inspector.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   inspector.webContents.on('will-navigate',e=>e.preventDefault());
-  agent=new Agent({directory:app.getPath('userData'),safeStorage,execute:executeAgent,notify:data=>send({kind:'agent-progress',data}),context:data=>({capturing,total:store.rows.size,selected:data.selectedId?safeRow(store.get(data.selectedId),true):null})});
+  agent=new Agent({directory:app.getPath('userData'),safeStorage,execute:executeAgent,notify:data=>send({kind:'agent-progress',data}),context:data=>({capturing,browserKind,browserTools:'Use browser_tabs to inspect open tabs and browser_read to read a page.',total:store.rows.size,selected:data.selectedId?safeRow(store.get(data.selectedId),true):null})});
   camoufox=new CamoufoxBrowser({directory:app.getPath('userData'),notify:status});
+  browserAgent=new BrowserAgent({adapter:()=>browserKind==='camoufox'?camoufoxAdapter(camoufox):embeddedAdapter(browser),confirm:confirmAgent});
   setupIpc();startEngine();setupUpdates();inspector.loadFile(path.join(__dirname,'index.html'));
   inspector.on('closed',()=>{inspector=null;browser?.close();app.quit();});
 });

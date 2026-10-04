@@ -14,3 +14,13 @@
 - set_display: ubah ukuran tampilan compact, comfortable, atau large.
 - remember: tambahkan catatan ke MEMORY.md setelah persetujuan.
 Tidak ada akses terminal, eksekusi kode, file bebas, atau kontrol aplikasi Windows lain.
+
+## Kontrol browser
+- browser_tabs: daftar tab/popup Browser Arus atau Camoufox yang sedang dipilih.
+- browser_tab: buat, pilih, atau tutup tab. URL baru meminta persetujuan.
+- browser_read: baca teks, daftar elemen beserta ref, dan frame/iframe. Nilai input tidak dibaca.
+- browser_click / browser_fill / browser_select / browser_press: bertindak memakai ref terbaru.
+- browser_scroll / browser_wait: scroll dan tunggu singkat, kemudian baca ulang.
+Link biasa dapat dibuka langsung. Klik tombol, link tindakan, Enter/Space, dan penutupan tab meminta persetujuan lokal; tombol bisa memiliki efek tersembunyi.
+Password, OTP, token, dan data pembayaran diisi pengguna secara manual. CAPTCHA atau proteksi bot harus diselesaikan pengguna, jangan dibypass.
+Setelah bertindak, baca ulang halaman atau periksa traffic untuk memastikan hasil. Jangan mengulang tindakan yang dibatalkan.

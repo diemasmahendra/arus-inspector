@@ -9,6 +9,16 @@ async function until(fn,label,timeout=60000){const start=Date.now();while(Date.n
  const secure=https.createServer({key:forge.pki.privateKeyToPem(keys.privateKey),cert:pem},(_req,res)=>{res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Content-Type','application/json');res.end('{"secure":true}');});const tlsPort=await new Promise(r=>secure.listen(0,'127.0.0.1',()=>r(secure.address().port)));
  const seen=[];
  const server=http.createServer((req,res)=>{
+   if(req.url==='/v1/chat/completions'){
+     let body='';req.on('data',c=>body+=c);req.on('end',()=>{const data=JSON.parse(body),last=data.messages.at(-1);const call=(id,name,args={})=>({content:null,tool_calls:[{id,type:'function',function:{name,arguments:JSON.stringify(args)}}]});let message;
+       if(last.role==='user')message=call('fox-read','browser_read');
+       else if(last.tool_call_id==='fox-read'){const r=JSON.parse(last.content);assert(r.text.includes('Camoufox agent form'));message=call('fox-fill','browser_fill',{ref:r.elements.find(e=>e.label==='Display name').ref,text:'Fox Agent'});}
+       else if(last.tool_call_id==='fox-fill'){assert(JSON.parse(last.content).done,last.content);const r=JSON.parse(data.messages.find(m=>m.tool_call_id==='fox-read').content);message=call('fox-click','browser_click',{ref:r.elements.find(e=>e.label==='Save changes').ref});}
+       else if(last.tool_call_id==='fox-click'){assert(JSON.parse(last.content).done,last.content);message=call('fox-wait','browser_wait',{ms:300});}
+       else if(last.tool_call_id==='fox-wait')message=call('fox-result','browser_read');
+       else{assert(JSON.parse(last.content).url?.includes('/agent-saved'),last.content);message={content:'Camoufox agent form saved.'};}
+       res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message}]}));});return;
+   }
    seen.push({url:req.url,method:req.method,cookie:req.headers.cookie||'',ua:req.headers['user-agent']||''});
    res.setHeader('Content-Type','text/html');
    if(req.url==='/start')res.end(`<!doctype html><h1>Camoufox fixture</h1><script>
@@ -18,6 +28,7 @@ async function until(fn,label,timeout=60000){const start=Date.now();while(Date.n
      fetch('https://localhost:${tlsPort}/secure-camoufox');
    </script>`);
    else if(req.url==='/popup')res.end(`<!doctype html><h1>Popup fixture</h1><script>window.onbeforeunload=()=>false;window.opener.postMessage('popup-ready',location.origin);const f=document.createElement('form');f.action='/popup-post';f.method='POST';f.target='_blank';f.innerHTML='<input name="popup" value="works">';document.body.append(f);f.submit();</script>`);
+   else if(req.url==='/agent-control')res.end('<!doctype html><h1>Camoufox agent form</h1><form action="/agent-saved"><label>Display name<input name="display"></label><button>Save changes</button></form>');
    else res.end('<h1>Captured</h1>');
  });const port=await new Promise(r=>server.listen(0,'127.0.0.1',()=>r(server.address().port)));
  let app;
@@ -35,10 +46,15 @@ async function until(fn,label,timeout=60000){const start=Date.now();while(Date.n
    await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.includes('/secure-camoufox')&&r.status===200)),'Camoufox HTTPS capture');
    const state=await page.evaluate(async()=>window.arus.state());assert.equal(state.browserKind,'camoufox');assert.equal(state.camoufox,'ready');
    const post=state.rows.find(r=>r.url.endsWith('/popup-post')&&r.status===200);assert(post,'popup POST captured');const detail=await page.evaluate(id=>window.arus.detail(id),post.id);assert.equal(detail.requestBody,'popup=works');
+   await page.evaluate(url=>window.arus.open(url,'camoufox'),`http://127.0.0.1:${port}/agent-control`);
+   await page.evaluate(async baseUrl=>{const state=await window.arus.agentState();await window.arus.agentSave({baseUrl,model:'fixture',files:state.files});},`http://127.0.0.1:${port}/v1`);
+   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1});});
+   const agentResult=await page.evaluate(()=>window.arus.agentChat({text:'Operate the local form.'}));assert.equal(agentResult.text,'Camoufox agent form saved.');
+   await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.includes('/agent-saved?display=Fox+Agent')&&r.status===200)),'Camoufox AI form capture');
    await page.locator('#close-browser').click();await until(()=>page.evaluate(async()=>!(await window.arus.state()).browserOpen),'close root and popups');
    const openBefore=seen.filter(r=>r.url==='/reopened').length;
    await page.locator('#target-url').fill(`http://127.0.0.1:${port}/reopened`);await page.locator('#open-button').click();await until(()=>Promise.resolve(seen.filter(r=>r.url==='/reopened').length>openBefore),'reopen cached engine');
    await page.locator('#close-browser').click();await until(()=>page.evaluate(async()=>!(await window.arus.state()).browserOpen),'close reopened browser');
-   assert.deepEqual(errors,[]);console.log('PASS: real Camoufox launch, Firefox UA, shared popup session, opener, nested form POST, HTTP/HTTPS capture, close despite beforeunload, cached relaunch');
+   assert.deepEqual(errors,[]);console.log('PASS: real Camoufox launch, Firefox UA, shared popup session, opener, nested form POST, HTTP/HTTPS capture, AI page read/native fill/click with captured form submission, close despite beforeunload, cached relaunch');
  }finally{if(app)await app.close();await new Promise(r=>server.close(r));await new Promise(r=>secure.close(r));fs.rmSync(directory,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});
