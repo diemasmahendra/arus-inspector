@@ -44,6 +44,7 @@ async function until(fn,label,timeout=60000){const start=Date.now();while(Date.n
    assert(seen.find(r=>r.url==='/popup').cookie.includes('camoufox_session=shared'));
    assert.equal(seen.find(r=>r.url==='/popup-post').method,'POST');assert(seen.find(r=>r.url==='/start').ua.includes('Firefox/'));
    await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.includes('/secure-camoufox')&&r.status===200)),'Camoufox HTTPS capture');
+   await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.endsWith('/popup-post')&&r.status===200)),'popup POST capture completes');
    const state=await page.evaluate(async()=>window.arus.state());assert.equal(state.browserKind,'camoufox');assert.equal(state.camoufox,'ready');
    const post=state.rows.find(r=>r.url.endsWith('/popup-post')&&r.status===200);assert(post,'popup POST captured');const detail=await page.evaluate(id=>window.arus.detail(id),post.id);assert.equal(detail.requestBody,'popup=works');
    await page.evaluate(url=>window.arus.open(url,'camoufox'),`http://127.0.0.1:${port}/agent-control`);
