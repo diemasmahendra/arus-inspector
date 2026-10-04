@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const {CaptureStore, validUrl, isText, clip, curl, replayHeaders, MAX_BODY} = require('./capture.cjs');
 const {Agent, FILES, MAX_FILE, safeRow} = require('./agent.cjs');
 const {CamoufoxBrowser}=require('./camoufox.cjs');
+const {BrowserTabs}=require('./browser-tabs.cjs');
 const AGENT_APPROVED=Symbol('agent-approved');
 const actions = {}; const uiPending = new Map(); let agent;
 let camoufox,browserKind='embedded',quitting=false;
@@ -49,41 +50,17 @@ function setupUpdates() {
     setTimeout(()=>updater.checkForUpdates().catch(()=>{}), 8000);
   } catch { updateState={status:'error',message:'Updater tidak tersedia.'}; }
 }
-function configureCaptureWindow(win) {
-  const wc=win.webContents;
-  wc.on('will-prevent-unload',event=>event.preventDefault());
-  function allowed(next){if(next==='about:blank')return true;try{validUrl(next);return true;}catch{return false;}}
-  // Let Chromium create the real child window so opener, postMessage and form targets work.
-  wc.setWindowOpenHandler(({url})=>allowed(url)?{
-    action:'allow',outlivesOpener:false,
-    overrideBrowserWindowOptions:{title:'Arus Browser',autoHideMenuBar:true,backgroundColor:'#ffffff',frame:true,minWidth:400,minHeight:320,
-      webPreferences:{partition:'arus-capture',contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:false}}
-  }:{action:'deny'});
-  wc.on('did-create-window',child=>configureCaptureWindow(child));
-  wc.on('will-navigate',(event,next)=>{if(!allowed(next))event.preventDefault();});
-  wc.on('will-redirect',(event,next)=>{if(!allowed(next))event.preventDefault();});
-}
 async function makeBrowser(url) {
-  if (browser && !browser.isDestroyed()) { browser.show(); await browser.loadURL(url); return; }
-  browser = secureWindow({width:1180,height:800,title:'Arus Browser',autoHideMenuBar:true,backgroundColor:'#ffffff', webPreferences:{partition:'arus-capture'}});
-  const win = browser, wc = win.webContents;
   await enginePromise;
-  await wc.session.setProxy({proxyRules:`http=127.0.0.1:${enginePort};https=127.0.0.1:${enginePort}`,proxyBypassRules:'<-loopback>'});
-  wc.session.setCertificateVerifyProc((request,callback)=>{
-    try {
-      const cert=new X509Certificate(request.certificate.data);
-      const host=cert.checkHost(request.hostname) || cert.checkIP(request.hostname);
-      const now=Date.now();
-      if(host && cert.verify(rootCertificate.publicKey) && now>=Date.parse(cert.validFrom) && now<=Date.parse(cert.validTo)) return callback(0);
-    } catch {}
-    callback(-3);
+  const capture=session.fromPartition('arus-capture');
+  await capture.setProxy({proxyRules:`http=127.0.0.1:${enginePort};https=127.0.0.1:${enginePort}`,proxyBypassRules:'<-loopback>'});
+  capture.setCertificateVerifyProc((request,callback)=>{
+    try{const cert=new X509Certificate(request.certificate.data),host=cert.checkHost(request.hostname)||cert.checkIP(request.hostname),now=Date.now();if(host && cert.verify(rootCertificate.publicKey) && now>=Date.parse(cert.validFrom) && now<=Date.parse(cert.validTo))return callback(0);}catch{}callback(-3);
   });
-  wc.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
-  wc.session.setPermissionCheckHandler(()=>false);
-  wc.session.on('will-download', event=>event.preventDefault());
-  configureCaptureWindow(win);
-  win.on('closed',()=>{browser=null;store.ids.clear();status();});
-  status(); await win.loadURL(url);
+  capture.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));capture.setPermissionCheckHandler(()=>false);
+  if(!capture.__arusDownloadsBlocked){capture.on('will-download',event=>event.preventDefault());capture.__arusDownloadsBlocked=true;}
+  if(!browser || browser.isDestroyed())browser=new BrowserTabs({onClosed:()=>{browser=null;store.ids.clear();status();}});
+  browser.open(url);status();
 }
 function handle(channel, fn) {
   actions[channel] = fn;
@@ -121,7 +98,7 @@ function setupIpc() {
     else if(action==='resume') capturing=true;
     else if(['focus','reload','close'].includes(action)){
       if(browserKind==='camoufox')await camoufox.control(action);
-      else if(action==='focus')browser?.show();else if(action==='reload')browser?.webContents.reload();else browser?.destroy();
+      else if(action==='focus')browser?.show();else if(action==='reload')browser?.reload();else browser?.destroy();
     }
     else throw new Error('Kontrol tidak dikenal.');
     if(action==='pause' || action==='resume') engine?.postMessage({kind:'capture',active:capturing});

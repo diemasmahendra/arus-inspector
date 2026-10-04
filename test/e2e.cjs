@@ -46,28 +46,44 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    await page.screenshot({path:path.join(__dirname,'../artifacts/empty.png')});
    await page.locator('#target-url').fill(`http://127.0.0.1:${port}/`);await page.locator('#open-button').click();
    await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.endsWith('/api/cart') && r.status===200)),'capture requests');
-   const browser=(await app.windows()).find(w=>w!==page);assert(browser,'capture browser exists');
+   const browser=(await app.windows()).find(w=>w.url().startsWith('http://'));assert(browser,'capture browser exists');
+   const chrome=(await app.windows()).find(w=>w.url().endsWith('/browser.html'));assert(chrome,'browser tab bar exists');
+   await chrome.waitForSelector('.tab');assert.equal(await chrome.locator('.tab').count(),1);
+   assert.equal(await browser.evaluate(()=>typeof window.arusBrowser),'undefined');
    assert.equal(await browser.evaluate(()=>typeof window.arus),'undefined');assert.equal(await browser.evaluate(()=>typeof require),'undefined');
    const parentUrl=browser.url();
    await browser.evaluate(()=>{document.cookie='popup_session=shared; path=/';window.popupMessages=[];window.addEventListener('message',e=>window.popupMessages.push(e.data));});
-   const popupWait=browser.waitForEvent('popup');
+
    assert.equal(await browser.evaluate(()=>{window.testPopup=window.open('about:blank','arus-popup','width=600,height=500,nodeIntegration=yes,contextIsolation=no,sandbox=no');return !!window.testPopup;}),true);
-   const popup=await popupWait;popup.on('dialog',dialog=>dialog.dismiss().catch(()=>{}));await popup.waitForLoadState();
+   let popup;await until(async()=>{popup=(await app.windows()).find(w=>w.url()==='about:blank');return !!popup;},'popup tab created');popup.on('dialog',dialog=>dialog.dismiss().catch(()=>{}));
    assert.equal(browser.url(),parentUrl);assert.equal(await popup.evaluate(()=>typeof require),'undefined');assert.equal(await popup.evaluate(()=>typeof window.arus),'undefined');
    await popup.evaluate(()=>window.opener.postMessage('popup-ready','*'));
    await until(()=>browser.evaluate(()=>window.popupMessages.includes('popup-ready')),'popup opener communication');
    await browser.evaluate(()=>window.testPopup.location='/popup-captured');await popup.waitForURL('**/popup-captured');
    assert((await popup.evaluate(()=>document.cookie)).includes('popup_session=shared'));
    await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.endsWith('/popup-captured') && r.status===200)),'popup traffic capture');
-   const nestedWait=popup.waitForEvent('popup');
+
    await popup.evaluate(()=>{const form=document.createElement('form');form.method='POST';form.action='/popup-form';form.target='_blank';form.innerHTML='<input name="popup" value="works">';document.body.append(form);form.submit();});
-   const nested=await nestedWait;await nested.waitForURL('**/popup-form');
+   let nested;await until(async()=>{nested=(await app.windows()).find(w=>w.url().endsWith('/popup-form'));return !!nested;},'form popup tab created');
    await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.endsWith('/popup-form') && r.method==='POST' && r.status===200)),'popup form POST capture');
    assert.equal(await nested.evaluate(()=>typeof require),'undefined');
    assert.equal(await popup.evaluate(()=>window.open('file:///etc/passwd')===null),true);
    await popup.evaluate(()=>{window.onbeforeunload=()=>false;});
    await app.evaluate(({BrowserWindow},url)=>{BrowserWindow.getAllWindows().find(w=>w.webContents.getURL()===url).close();},popup.url());await until(()=>Promise.resolve(popup.isClosed()),'popup closes despite beforeunload');await until(()=>Promise.resolve(nested.isClosed()),'nested popup closes with opener');
    assert.equal(browser.url(),parentUrl);
+   const originalTab=(await chrome.evaluate(()=>window.arusBrowser.state())).active;
+   await chrome.locator('#new-tab').click();await until(async()=>await chrome.locator('.tab').count()===2,'new tab button');
+   await chrome.locator('#address').fill(`http://127.0.0.1:${port}/tab-second`);await chrome.locator('#address').press('Enter');
+   await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.url.endsWith('/tab-second')&&r.status===200)),'second tab capture');
+   await chrome.locator('#address').fill(`http://127.0.0.1:${port}/tab-third`);await chrome.locator('#address').press('Enter');
+   await until(()=>chrome.evaluate(async()=>(await window.arusBrowser.state()).canBack),'tab history');await chrome.locator('#back').click();
+   await until(()=>chrome.evaluate(async()=>{const s=await window.arusBrowser.state();return s.tabs.find(t=>t.id===s.active).url.endsWith('/tab-second');}),'back navigation');
+   await chrome.locator('#forward').click();await until(async()=>(await chrome.locator('#address').inputValue()).endsWith('/tab-third'),'forward navigation');
+   await chrome.evaluate(id=>window.arusBrowser.action('select',{id}),originalTab);
+   assert.equal(browser.url(),parentUrl);await chrome.screenshot({path:path.join(__dirname,'../artifacts/browser-tabs.png')});
+   await chrome.locator('.tab:not(.selected) .tab-close').click();await until(async()=>await chrome.locator('.tab').count()===1,'close inactive tab');
+   await chrome.keyboard.press('Control+t');await until(async()=>await chrome.locator('.tab').count()===2,'Ctrl+T creates tab');await chrome.keyboard.press('Control+w');await until(async()=>await chrome.locator('.tab').count()===1,'Ctrl+W closes tab');
+   await chrome.keyboard.press('Control+l');await until(()=>chrome.locator('#address').evaluate(el=>document.activeElement===el),'Ctrl+L focuses address');
    await page.bringToFront();
    await until(async()=>await page.locator('.traffic-row').count()>=8,'table rows');
    await selectRow(page.locator('.traffic-row').filter({hasText:'/api/profile'}).first());
@@ -142,7 +158,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    await page.screenshot({path:path.join(__dirname,'../artifacts/form.png')});
    await page.locator('#agent-expand').click();await page.locator('#agent-new').click();await page.locator('#agent-input').fill('TEST_FORM');await page.locator('#agent-send').click();await until(async()=>(await page.locator('#agent-messages').textContent()).includes('Form berhasil diparse.'),'AI reads form');assert(!JSON.stringify(aiPayloads).includes('signature-secret'));assert(!JSON.stringify(aiPayloads).includes('nested-form-secret'));await page.locator('#agent-close').click();
    for(const width of [1280,1000]){
-     await app.evaluate(({BrowserWindow},width)=>{BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('file:')).setSize(width,850);},width);
+     await app.evaluate(({BrowserWindow},width)=>{BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/index.html')).setSize(width,850);},width);
      await page.locator('#agent-expand').click();
      await until(()=>page.evaluate(()=>{const main=document.querySelector('main'),agent=document.querySelector('#agent-dock');return main.getBoundingClientRect().right<=agent.getBoundingClientRect().left+1;}),'docked without overlap');
      if(width===1000){await page.locator('[data-workspace-view="detail"]').click();assert.equal(await page.locator('.detail-panel').isVisible(),true);}
@@ -158,7 +174,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    await page.locator('#clear-button').click();await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.length===0),'clear');await workspace('detail');assert.equal(await page.locator('#detail-empty').isVisible(),true);
    browser.on('dialog',dialog=>dialog.dismiss().catch(()=>{}));
    await browser.evaluate(()=>{window.onbeforeunload=()=>false;});
-   await app.evaluate(({BrowserWindow},url)=>{BrowserWindow.getAllWindows().find(w=>w.webContents.getURL()===url).close();},browser.url());await until(()=>page.evaluate(async()=>!(await window.arus.state()).browserOpen),'browser closes despite beforeunload');
-   assert.deepEqual(errors,[]);console.log('PASS: desktop launch, Whistle IPC, HTTP/HTTPS capture, popup opener/session/form capture, request bodies, filters, pause/resume, replay, XSS isolation, dialogs, five Markdown profiles, safe agent tools, provider redaction, stop and clear');
- }finally{if(app)await app.close();await new Promise(r=>server.close(r));await new Promise(r=>secure.close(r));fs.rmSync(directory,{recursive:true,force:true});}
+   await page.locator('#close-browser').click();await until(()=>page.evaluate(async()=>!(await window.arus.state()).browserOpen),'browser closes despite beforeunload');
+   assert.deepEqual(errors,[]);console.log('PASS: desktop launch, Whistle IPC, HTTP/HTTPS capture, browser tabs/history, popup opener/session/form capture, request bodies, filters, pause/resume, replay, XSS isolation, dialogs, five Markdown profiles, safe agent tools, provider redaction, stop and clear');
+ }catch(error){console.error('Desktop test failure:',error);throw error;}finally{if(app)await app.close();server.closeAllConnections();secure.closeAllConnections();await new Promise(r=>server.close(r));await new Promise(r=>secure.close(r));fs.rmSync(directory,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});
