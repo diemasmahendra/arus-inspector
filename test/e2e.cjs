@@ -92,6 +92,9 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    const page=await app.firstWindow();await page.waitForSelector('#open-button');
    async function workspace(name){await page.evaluate(async name=>{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const tab=document.querySelector(`[data-workspace-view="${name}"]`);if(tab.getClientRects().length)tab.click();},name);}
    async function selectRow(row){await workspace('traffic');await row.click();}
+   async function alignedSidebar(){const geometry=await page.evaluate(()=>['#proxy-button','#sessions-button'].map(selector=>{const button=document.querySelector(selector),node=[...button.childNodes].find(n=>n.nodeType===Node.TEXT_NODE&&n.textContent.trim()),range=document.createRange();range.selectNodeContents(node);return {icon:button.querySelector('svg').getBoundingClientRect().left,text:range.getBoundingClientRect().left};}));assert(Math.abs(geometry[0].icon-geometry[1].icon)<0.5,'sidebar icons must align');assert(Math.abs(geometry[0].text-geometry[1].text)<0.5,'sidebar menu labels must align');}
+   await alignedSidebar();
+
    const errors=[];page.on('pageerror',e=>errors.push(e.message));
    await until(()=>page.evaluate(async()=>(await window.arus.state()).engine==='ready'),'proxy ready');
    fs.mkdirSync(path.join(__dirname,'../artifacts'),{recursive:true});
@@ -246,6 +249,7 @@ async function until(fn,label){const start=Date.now();while(Date.now()-start<200
    const sessionPath=path.join(directory,'saved.arus');await app.evaluate(({dialog},file)=>{globalThis.__sessionSaveDialog=dialog.showSaveDialog;globalThis.__sessionOpenDialog=dialog.showOpenDialog;dialog.showSaveDialog=async()=>({canceled:false,filePath:file});dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},sessionPath);await page.locator('#sessions-button').click();await page.locator('#session-save').click();await until(()=>fs.existsSync(sessionPath),'session file saved');assert(JSON.parse(fs.readFileSync(sessionPath)).rows.some(r=>r.bookmark));await page.locator('#session-open').click();await until(()=>page.evaluate(async()=>(await window.arus.state()).rows.some(r=>r.archived&&r.bookmark)),'session imported');await app.evaluate(({dialog})=>{dialog.showSaveDialog=globalThis.__sessionSaveDialog;dialog.showOpenDialog=globalThis.__sessionOpenDialog;});assert.equal(await page.evaluate(()=>window.compromised),undefined);
    for(const width of [1280,1000]){
      await app.evaluate(({BrowserWindow},width)=>{BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/index.html')).setSize(width,850);},width);
+     await alignedSidebar();
      await page.locator('#agent-expand').click();
      await until(()=>page.evaluate(()=>{const main=document.querySelector('main'),agent=document.querySelector('#agent-dock');return main.getBoundingClientRect().right<=agent.getBoundingClientRect().left+1;}),'docked without overlap');
      if(width===1000){await page.locator('[data-workspace-view="detail"]').click();assert.equal(await page.locator('.detail-panel').isVisible(),true);}
