@@ -3,12 +3,13 @@ const http=require('node:http'),https=require('node:https'),fs=require('node:fs/
 const {Readable}=require('node:stream');
 const {randomUUID,X509Certificate}=require('node:crypto');
 const {matches,defaults,validateSettings,shadowRules}=require('./proxy-settings.cjs');
-const MAX=1024*1024;
+const MAX=1024*1024,MAX_METADATA=24*1024*1024;
 function certificate(socket){try{const peer=socket?.getPeerCertificate?.();if(!peer?.raw)return null;const c=new X509Certificate(peer.raw);return {subject:c.subject,issuer:c.issuer,validFrom:c.validFrom,validTo:c.validTo,serialNumber:c.serialNumber,fingerprint256:c.fingerprint256,subjectAltName:c.subjectAltName,tls:socket.getProtocol?.(),cipher:socket.getCipher?.()?.name,authorized:socket.authorized===true,source:'upstream socket'};}catch{return null;}}
 class ProxyControls{
- constructor(send){this.send=send;this.settings=defaults();this.pending=new Map();this.metadata=new Map();}
+ constructor(send){this.send=send;this.settings=defaults();this.pending=new Map();this.metadata=new Map();this.metadataCosts=new Map();this.metadataBytes=0;}
  set(value,proxy){this.settings=validateSettings(value);proxy?.setShadowRules(shadowRules(this.settings));return this.settings;}
- annotate(req,value){const key=req.reqId;this.metadata.set(key,{...this.metadata.get(key),...value});while(this.metadata.size>3000)this.metadata.delete(this.metadata.keys().next().value);}
+ annotate(req,value){const key=req.reqId,next={...this.metadata.get(key),...value};this.metadataBytes-=this.metadataCosts.get(key)||0;const cost=Buffer.byteLength(JSON.stringify(next));this.metadata.set(key,next);this.metadataCosts.set(key,cost);this.metadataBytes+=cost;while(this.metadata.size>3000||this.metadataBytes>MAX_METADATA){const oldest=this.metadata.keys().next().value;this.metadataBytes-=this.metadataCosts.get(oldest)||0;this.metadata.delete(oldest);this.metadataCosts.delete(oldest);}}
+
  reply(res,status,body,headers={}){const src=Readable.from([Buffer.from(body)]);src.statusCode=status;src.headers={'content-type':'text/plain; charset=utf-8',...headers};res.response(src);}
  middleware(req,res,next){
   res.once('src',response=>{const cert=certificate(response.socket);if(cert)this.annotate(req,{certificate:cert});});
@@ -40,4 +41,4 @@ class ProxyControls{
  }
  snapshot(){return {settings:this.settings,pending:[...this.pending.values()].map(p=>p.data)};}
 }
-module.exports={ProxyControls,certificate};
+module.exports={ProxyControls,certificate,MAX_METADATA};

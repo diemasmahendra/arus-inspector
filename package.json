@@ -1,6 +1,6 @@
 {
   "name": "arus-inspector",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A focused desktop HTTP traffic inspector",
   "main": "src/main.cjs",
   "author": "Muhammad Diemas Mahendra",

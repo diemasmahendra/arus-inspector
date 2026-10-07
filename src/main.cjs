@@ -10,7 +10,7 @@ const {BrowserAgent}=require('./browser-agent.cjs');
 const {compareRequests}=require('./compare.cjs');
 const {defaults,validateSettings}=require('./proxy-settings.cjs');
 const {importSession,serializeSession,searchRows,MAX_FILE:MAX_SESSION}=require('./sessions.cjs');
-let proxySettings=defaults();const engineCalls=new Map(),breakpoints=new Map(),earlyFrames=new Map();
+let proxySettings=defaults(),proxySaveQueue=Promise.resolve();const engineCalls=new Map(),breakpoints=new Map(),earlyFrames=new Map();
 function engineCall(kind,data){return new Promise((resolve,reject)=>{const id=randomUUID(),timer=setTimeout(()=>{engineCalls.delete(id);reject(Error('Mesin proxy tidak merespons.'));},10000);engineCalls.set(id,{resolve,reject,timer});engine.postMessage({kind,id,...data});});}
 function attachFrame(engineId,data){const id=store.ids.get(engineId);if(id){const row=store.get(id);store.update(id,{frames:[...(row.frames||[]),data].slice(-200)});}else{earlyFrames.set(engineId,[...(earlyFrames.get(engineId)||[]),data].slice(-200));while(earlyFrames.size>100)earlyFrames.delete(earlyFrames.keys().next().value);}}
 const {embeddedAdapter,camoufoxAdapter}=require('./browser-drivers.cjs');
@@ -102,7 +102,7 @@ function setupIpc() {
     for(const name of FILES)await fs.writeFile(path.join(directory,name),agent.config.files[name]);return true;
   });
   handle('proxy-state',()=>({settings:proxySettings,pending:[...breakpoints.values()]}));
-  handle('proxy-save',async value=>{await enginePromise;const next=validateSettings(value);await engineCall('settings',{settings:next});try{await fs.writeFile(path.join(app.getPath('userData'),'proxy-settings.json'),JSON.stringify(next));}catch(e){await engineCall('settings',{settings:proxySettings});throw e;}proxySettings=next;send({kind:'proxy-settings',data:next});return next;});
+  handle('proxy-save',value=>{const next=validateSettings(value);const run=proxySaveQueue.then(async()=>{await enginePromise;await engineCall('settings',{settings:next});try{await fs.writeFile(path.join(app.getPath('userData'),'proxy-settings.json'),JSON.stringify(next));}catch(e){await engineCall('settings',{settings:proxySettings});throw e;}proxySettings=next;send({kind:'proxy-settings',data:next});return next;});proxySaveQueue=run.catch(()=>{});return run;});
   handle('map-file',async()=>{const result=await dialog.showOpenDialog(inspector,{title:'Pilih response Map Local (maksimal 1 MiB)',properties:['openFile']});if(result.canceled)return null;const file=result.filePaths[0],stat=await fs.stat(file);if(!stat.isFile()||stat.size>MAX_BODY)throw Error('Map Local maksimal 1 MiB.');return file;});
   handle('breakpoint-resolve',(id,decision)=>engineCall('breakpoint-resolve',{breakpointId:id,decision}));
   handle('search-content',query=>searchRows(store,query));
