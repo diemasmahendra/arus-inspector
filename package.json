@@ -1,6 +1,6 @@
 {
   "name": "arus-inspector",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "description": "A focused desktop HTTP traffic inspector",
   "main": "src/main.cjs",
   "author": "Muhammad Diemas Mahendra",
@@ -10,7 +10,7 @@
     "start": "electron .",
     "test": "node --test test/*.test.cjs",
     "test:e2e": "node test/e2e.cjs",
-    "check": "node --check src/main.cjs && node --check src/capture.cjs && node --check src/preload.cjs && node --check src/renderer.js && node --check src/engine.cjs && node --check src/agent.cjs && node --check src/agent-ui.js && node --check src/body.js && node --check src/camoufox.cjs && node --check src/browser-tabs.cjs && node --check src/browser-preload.cjs && node --check src/browser.js && node --check src/browser-agent.cjs && node --check src/browser-drivers.cjs && node --check src/agent-task.cjs && node --check src/compare.cjs && node --check src/compare-ui.js",
+    "check": "node --check src/main.cjs && node --check src/capture.cjs && node --check src/preload.cjs && node --check src/renderer.js && node --check src/engine.cjs && node --check src/agent.cjs && node --check src/agent-ui.js && node --check src/body.js && node --check src/camoufox.cjs && node --check src/browser-tabs.cjs && node --check src/browser-preload.cjs && node --check src/browser.js && node --check src/browser-agent.cjs && node --check src/browser-drivers.cjs && node --check src/agent-task.cjs && node --check src/compare.cjs && node --check src/compare-ui.js && node --check src/proxy-settings.cjs && node --check src/proxy-controls.cjs && node --check src/proxy-middleware.cjs && node --check src/sessions.cjs && node --check src/network-ui.js",
     "dist": "electron-builder --win nsis",
     "test:camoufox": "node test/camoufox-e2e.cjs"
   },

@@ -25,7 +25,7 @@ function safeRow(r,detail=false){
   if(!r)return null;
   const u=new URL(redactUrl(r.url));for(const key of u.searchParams.keys())if(secret.test(key))u.searchParams.set(key,'[REDACTED]');
   const out={id:r.id,url:u.href,method:r.method,status:r.status,type:r.type,mime:r.mime,duration:r.duration,size:r.size};
-  if(detail)Object.assign(out,{requestHeaders:scrub(redactHeaders(r.requestHeaders)),responseHeaders:scrub(redactHeaders(r.responseHeaders)),requestBody:safeBody(r.requestBody,contentType(r.requestHeaders)),responseBody:safeBody(r.responseBody,r.mime||contentType(r.responseHeaders)),bodyNote:r.bodyNote});
+  if(detail)Object.assign(out,{requestHeaders:scrub(redactHeaders(r.requestHeaders)),responseHeaders:scrub(redactHeaders(r.responseHeaders)),requestBody:safeBody(r.requestBody,contentType(r.requestHeaders)),responseBody:safeBody(r.responseBody,r.mime||contentType(r.responseHeaders)),bodyNote:r.bodyNote,sslState:r.sslState,timings:r.timings,certificate:r.certificate,bookmark:!!r.bookmark});
   return out;
 }
 function endpoint(input){
@@ -50,6 +50,14 @@ const TOOLS=[
  tool('update_task','Catat progres langkah. Tandai done setelah hasil diperiksa.',{stepId:{type:'string',maxLength:20},status:{type:'string',enum:['pending','running','done','blocked']},note:{type:'string',maxLength:500}},['stepId','status']),
  tool('request_handoff','Jeda tugas untuk input manual atau keputusan pengguna. Tindakan berikutnya berhenti sampai pengguna menekan Lanjutkan.',{reason:{type:'string',maxLength:1000}},['reason']),
  tool('compare_requests','Bandingkan dua request dengan data sensitif disamarkan.',{leftId:id,rightId:id},['leftId','rightId']),
+ tool('search_traffic_content','Cari isi header, JSON/form body dan catatan secara lokal; hasil ringkas disamarkan.',{query:str},['query']),
+ tool('inspect_websocket','Baca pesan WebSocket JSON dengan rahasia disamarkan. Pesan teks/biner lain dihilangkan.',{id},['id']),
+ tool('proxy_settings','Lihat aturan proxy dan antrean breakpoint tanpa body / path file lokal.'),
+ tool('configure_proxy','Atur domain SSL, block, breakpoint atau throttling setelah persetujuan lokal.',{kind:{type:'string',enum:['block','breakpoint','throttle','ssl_bypass','ssl_inspect']},host:{type:'string',maxLength:253},path:{type:'string',maxLength:2000},method:{type:'string',enum:['*','GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS']},enabled:{type:'boolean'},delay:{type:'number',minimum:0,maximum:30000},kbps:{type:'number',minimum:0,maximum:100000}},['kind','host']),
+ tool('map_local','Minta pengguna memilih file response lokal, kemudian konfirmasi aturan Map Local.',{host:{type:'string',maxLength:253},path:{type:'string',maxLength:2000}},['host']),
+ tool('bookmark_request','Tandai request penting dan simpan catatan lokal.',{id,bookmark:{type:'boolean'},note:{type:'string',maxLength:4000}},['id','bookmark','note']),
+ tool('save_session','Simpan sesi lengkap melalui dialog lokal. File berisi data asli.'),
+ tool('import_session','Minta pengguna memilih sesi Arus / HAR untuk diimport.'),
  tool('browser_tabs','Daftar tab dan popup browser yang sedang dipilih.'),
  tool('browser_tab','Buat, pilih, atau tutup tab. URL HTTP(S) opsional untuk tab baru.',{action:{type:'string',enum:['new','select','close']},tabId,url:str},['action']),
  tool('browser_read','Baca teks dan elemen halaman, termasuk frame yang dipilih. Nilai input tidak dibaca. Gunakan ref hasil baca untuk bertindak.',{tabId,frameId:{type:'string',maxLength:100}}),
@@ -62,7 +70,7 @@ const TOOLS=[
  tool('list_traffic','Cari ringkasan request. Hasil dibatasi 80.',{query:str,domain:str,errors:{type:'boolean'}}),
  tool('inspect_request','Baca request dengan data sensitif disamarkan.',{id},['id']),
  tool('filter_traffic','Ubah filter pada UI.',{query:str,domain:str,filter:{type:'string',enum:['all','api','errors']}}),
- tool('select_request','Pilih request dan tab detail.',{id,tab:{type:'string',enum:['response','request','headers','timing']}},['id']),
+ tool('select_request','Pilih request dan tab detail.',{id,tab:{type:'string',enum:['response','request','headers','timing','query','cookies','tls','websocket','notes']}},['id']),
  tool('control_capture','Jeda/lanjut capture atau tampilkan/reload browser.',{action:{type:'string',enum:['pause','resume','focus','reload']}},['action']),
  tool('open_browser','Buka URL setelah konfirmasi pengguna.',{url:str},['url']),
  tool('prepare_replay','Siapkan request asli di composer. Belum mengirim. headers adalah objek JSON string.',{id,url:str,method:str,headers:str,body:str},['id']),
@@ -159,4 +167,4 @@ class Agent {
   }finally{this.controller=null;this.pauseRequested=null;this.emitTask();this.notify({phase:'idle',label:'Siap'});}
  }
 }
-module.exports={Agent,FILES,MAX_FILE,validateFiles,safeRow,endpoint,validateArgs,TOOLS};
+module.exports={safeBody,Agent,FILES,MAX_FILE,validateFiles,safeRow,endpoint,validateArgs,TOOLS};

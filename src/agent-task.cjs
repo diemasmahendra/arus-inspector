@@ -14,5 +14,5 @@ class Task {
    return '';
  }
 }
-const mutating=new Set(['open_browser','browser_click','browser_fill','browser_select','browser_press','replay_request','clear_traffic','remember']);
+const mutating=new Set(['open_browser','browser_click','browser_fill','browser_select','browser_press','replay_request','clear_traffic','remember','configure_proxy','map_local','bookmark_request','save_session','import_session']);
 module.exports={Task,fingerprint,mutating};

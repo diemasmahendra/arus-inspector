@@ -21,12 +21,15 @@ To connect another browser: open **Panduan**, set its HTTP and HTTPS proxy to th
 ## Features
 
 - Live HTTP / HTTPS capture through a local Whistle proxy.
-- Domain, API, error, and free-text filters.
-- Request / response bodies, headers, metadata, and pretty JSON.
+- Domain, API, error, method/status/type and bookmark filters; local header/body search.
+- Configurable log columns, sorting, drag/keyboard column resizing, timing waterfall, context menu and request notes.
+- Request / response Raw/Pretty bodies, Query, Cookies, headers, image preview, SSL certificate metadata and WebSocket messages.
 - Resizable inspector, keyboard navigation, Ctrl+K search, Space to pause/resume.
 - Copy cURL (redacted by default, full copy available with confirmation).
 - Edit and replay requests with a 30-second timeout and no automatic browser cookies. Redirects are not followed. Browser-managed Sec-* metadata and transport headers are rebuilt by Chromium; other explicit request headers are retained.
 - HAR export. Standard export redacts known sensitive headers and query parameters, omits bodies. Full export requires confirmation. Review any export before sharing: arbitrary headers and URL path segments can contain sensitive data.
+- Save full `.arus` sessions and import `.arus` / HAR 1.2.
+- SSL bypass per domain, HTTP(S) Block, Map Local, request breakpoints and delay/download throttling.
 - GitHub Releases update checks, download progress, and restart-to-install.
 - AI chat and controlled application tools, with five editable Markdown profiles.
 - Task plans and progress, pause/resume, manual browser handoff, and repeated-error/observation detection.
@@ -39,7 +42,7 @@ No telemetry or account is implemented. Capture records are kept in memory, boun
 
 Pause stops recording into Arus; the proxy continues forwarding traffic. Closing Arus stops its proxy. Browser Arus has a tab bar, new/close tab buttons, address bar, back/forward, reload/stop, and Ctrl+T/W/L/Tab shortcuts. Every tab shares the capture session. Popup windows retain opener communication and the same captured session. Use the + button or Ctrl+T to open regular tabs. Blank-window flows, opener communication, and links/forms targeting a new window are supported. Downloads and device permissions are disabled in the capture browser. Browser sessions are temporary. **Tutup browser** closes the selected browser without allowing pages to hold it open. Camoufox uses a separate Firefox process through camoufox-js/Playwright, with the same local capture proxy, popup session, and upstream TLS verification. HTTPS certificate exceptions are confined to its temporary capture context; no system trust or proxy changes are made. This is a debugging browser, not a replacement for your daily browser.
 
-Arus does not display WebSocket frames, SSE streams, gRPC/protobuf decoding, Android patching, or traffic that bypasses the configured proxy. Some sites reject embedded Chromium browsers. Apps using certificate pinning may reject the proxy CA.
+Arus does not provide an SSE stream viewer, gRPC/protobuf decoding, Android patching, or traffic that bypasses the configured proxy. Some sites reject embedded Chromium browsers. Apps using certificate pinning may reject the proxy CA.
 
 See [SECURITY.md](SECURITY.md) for the known upstream node-forge advisory and current exposure assessment.
 
@@ -121,3 +124,23 @@ Body comparisons inspect up to 500 fields/lines and display up to 120 changed an
 For `application/x-www-form-urlencoded`, the Request/Response body view offers **Form** (decoded field/value table, duplicates preserved) and **Raw** (exact captured body). Form display is bounded to 500 fields; Raw includes the entire captured body within the existing 1 MiB capture limit. The agent receives up to 100 parsed fields, with known sensitive keys (including Signature, tokens, passwords, and nested JSON secrets) masked. Raw secrets remain local; they are not automatically sent to the model. Multipart file uploads and other non-JSON body formats are still omitted from AI context.
 
 Direct chat requests take priority over conflicting saved Markdown preferences. The application sends the fixed policy separately from editable profiles, which are lower-priority user preferences. Clear requests should lead to tool execution and verification rather than an offer to act. This policy applies even to existing saved profiles; their contents are preserved. Model compliance still depends on the configured provider, and application permissions and execution limits remain enforced.
+
+## Network workspace (v0.3)
+
+**Log options** provides method/status/type filters, bookmark filtering, sorting, and column visibility/order. Drag a column boundary (or focus it and use Left/Right) to resize. Column settings survive restart. **Cari isi** searches captured headers, bodies, notes and WebSocket text locally; results are a snapshot, so run the search again to include new traffic. The regular search box continues to filter URL/method/status/type. Right-click a request for cURL, replay, comparison, notes or a rule for its domain.
+
+The detail panel adds **Query**, **Cookies**, **SSL**, **WebSocket** and **Catatan**. Query duplicates remain visible. JSON/text bodies offer Raw and Pretty; captured PNG/JPEG/GIF/WebP/AVIF/BMP responses can be previewed within the 1 MiB limit. SVG and HTML responses are never executed. Timing uses proxy timestamps: DNS, connection/TLS, send, server wait and download. Missing phases are shown as unavailable, including some reused connections; the waterfall is not a browser resource-timing trace.
+
+**SSL** shows the upstream certificate issuer/subject, validity, SAN, serial, SHA-256 fingerprint, TLS version and cipher when available from the actual upstream socket. It does not initiate a separate probe. Tunnel connections, cache, Map Local and some reused or HTTP/2 sockets may lack certificate information. Upstream TLS validation remains enabled. SSL status distinguishes inspected HTTPS, bypassed tunnels and failed connections.
+
+**Aturan proxy → SSL Proxying** lists exact hostnames or `*.example.com` domains to pass through without HTTPS inspection. Remove an entry to inspect that domain again. This affects new TLS connections; reopen the browser to avoid reusing an existing connection. Certificate pinning is not bypassed.
+
+HTTP(S) request rules match a literal hostname, path prefix and optional method. Rules apply to traffic through the Arus proxy, not direct replay or WebSocket upgrade handshakes. Priority is Block, then Map Local, then throttle/breakpoint; the first matching rule of each kind is used. Block returns 403. Map Local uses an explicitly chosen file (maximum 1 MiB), Content-Type and status; no target request is sent. Missing or oversized local files produce 502. Throttling delays a request by up to 30 seconds and limits response download speed in kbps; upload speed is not simulated.
+
+Request breakpoints hold up to 16 concurrent requests before forwarding. Click the floating queue, select a request, edit method/headers/text body and choose **Teruskan request** or **Batalkan request**. Target URL stays fixed. Bodies are limited to 1 MiB; larger requests are rejected before forwarding. Binary or compressed bodies can be continued unchanged but not edited. Pending requests expire after two minutes and are cancelled, never automatically forwarded. Closing the dialog leaves the request queued. Continuing sends once with the original or edited headers/body and validates upstream TLS; redirects are returned without being followed. Rules persist locally but HTTP request rules start disabled after restarting Arus. SSL bypass preferences persist.
+
+The WebSocket viewer retains the latest 200 frames per connection, at most 64 KiB per frame (text or base64 binary), within the existing 48 MiB session budget. Control/close frames and truncation are labelled. Messages remain local; the agent can inspect bounded JSON frames with heuristic masking, while other text/binary payloads are omitted from provider context.
+
+**Sesi & import** saves an explicit full `.arus` file including raw headers/body, bookmarks, notes, image previews, SSL metadata and frames. It may contain credentials. There is no automatic disk capture. Import appends archived requests from `.arus` or HAR 1.2, with new local IDs so they cannot receive live engine updates. Files are limited to 64 MiB and imported data to 3,000 records / 48 MiB. HAR base64 bodies are not decoded by the importer. Captured records without an explicit save still disappear when Arus closes.
+
+The agent can search local content, inspect masked JSON WebSocket messages, view rules, bookmark requests, and invoke local session/file dialogs. Creating SSL/block/throttle/breakpoint/Map Local rules requires local approval. Map Local only uses a file selected through the local dialog; the agent cannot supply arbitrary file paths. Breakpoint release/edit is performed manually in the local queue.

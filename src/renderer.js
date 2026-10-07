@@ -26,7 +26,7 @@ const statusText=r=>r.error?'ERR':r.status || '···';
 const parts=r=>{try{return new URL(r.url);}catch{return {hostname:'',pathname:r.url,search:''};}};
 function toast(message){$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').hidden=true,5000);}
 async function act(fn){try{return await fn();}catch(e){toast(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/,''));return undefined;}}
-function visible(){return [...rows.values()].filter(r=>(!domain || parts(r).hostname===domain) && (filter!=='errors' || r.error || r.status>=400) && (filter!=='api' || ['Fetch','XHR','Replay'].includes(r.type) || /json/.test(r.mime || '')) && (!query || `${r.url} ${r.method} ${r.status || ''} ${r.type}`.toLowerCase().includes(query)));}
+function visible(){const base=[...rows.values()].filter(r=>(!domain || parts(r).hostname===domain) && (filter!=='errors' || r.error || r.status>=400) && (filter!=='api' || ['Fetch','XHR','Replay'].includes(r.type) || /json/.test(r.mime || '')) && (!query || `${r.url} ${r.method} ${r.status || ''} ${r.type}`.toLowerCase().includes(query)));return window.ArusNetwork?window.ArusNetwork.filter(base):base;}
 function schedule(){if(!renderTimer)renderTimer=setTimeout(()=>{renderTimer=null;render();},90);}
 function render(){
   const list=visible(),counts=new Map();let totalBytes=0,errors=0;
@@ -37,7 +37,9 @@ function render(){
   $('#all-domains').classList.toggle('active',!domain);
   const scroll=$('#traffic-scroll'),oldTop=scroll.scrollTop;
   // Keep the renderer bounded even during long sessions; engine/store retain at most 3,000 records.
-  $('#traffic-rows').innerHTML=list.map(r=>{const u=parts(r);return `<button role="option" aria-selected="${r.id===selected}" class="traffic-row ${r.id===selected?'selected':''}" data-id="${r.id}" title="${escape(r.url)}"><span class="method ${escape(r.method)}">${escape(r.method)}</span><span class="request-cell"><span class="request-path">${escape(u.pathname+u.search)}</span><span class="request-host">${escape(u.hostname)} <span>· ${escape(r.type)}</span></span></span><span class="status ${statusClass(r)}">${statusText(r)}</span><span class="cell-meta">${time(r.duration)}</span><span class="cell-meta">${size(r.size)}</span></button>`;}).join('');
+  window.ArusNetwork?.head();
+  $('#traffic-rows').innerHTML=list.map(r=>{if(window.ArusNetwork)return window.ArusNetwork.row(r,r.id===selected);const u=parts(r);return `<button role="option" aria-selected="${r.id===selected}" class="traffic-row ${r.id===selected?'selected':''}" data-id="${r.id}" title="${escape(r.url)}"><span class="method ${escape(r.method)}">${escape(r.method)}</span><span class="request-cell"><span class="request-path">${escape(u.pathname+u.search)}</span><span class="request-host">${escape(u.hostname)} <span>· ${escape(r.type)}</span></span></span><span class="status ${statusClass(r)}">${statusText(r)}</span><span class="cell-meta">${time(r.duration)}</span><span class="cell-meta">${size(r.size)}</span></button>`;}).join('');
+  window.ArusNetwork?.after();
   $('#empty').hidden=rows.size>0;$('#no-results').hidden=rows.size===0 || list.length>0;
   scroll.scrollTop=follow?scroll.scrollHeight:oldTop;
   if(selected && !rows.has(selected)){selected=null;detail=null;$('#detail-content').hidden=true;$('#detail-empty').hidden=false;}
@@ -74,20 +76,24 @@ function renderDetail(){
   $('#detail-status').textContent=detail.error?'Koneksi gagal':detail.status?`${detail.status} ${detail.statusText||''}`:'Menunggu';$('#detail-status').className=`status ${statusClass(detail)}`;
   $('#detail-time').textContent=time(detail.duration);$('#detail-url').textContent=detail.url;
   let html='';
-  if(tab==='headers')html=headers('REQUEST HEADERS',detail.requestHeaders)+headers('RESPONSE HEADERS',detail.responseHeaders);
-  else if(tab==='timing')html=[['Mulai',new Date(detail.startedAt).toLocaleString('id-ID')],['Durasi total',time(detail.duration)],['Ukuran response',size(detail.size)],['Protokol',detail.protocol||'—'],['Alamat server',detail.remoteAddress||'—'],['Jenis',detail.type],['Content-Type',detail.mime||'—']].map(([k,v])=>`<div class="info-line"><span>${k}</span><strong>${escape(v)}</strong></div>`).join('');
+  if(window.ArusNetwork&&['query','cookies','tls','websocket','notes'].includes(tab))html=window.ArusNetwork.detail(tab,detail);
+  else if(tab==='headers')html=headers('REQUEST HEADERS',detail.requestHeaders)+headers('RESPONSE HEADERS',detail.responseHeaders);
+  else if(tab==='timing')html=(window.ArusNetwork?.timing(detail)||'')+[['Mulai',new Date(detail.startedAt).toLocaleString('id-ID')],['Durasi total',time(detail.duration)],['Ukuran response',size(detail.size)],['Protokol',detail.protocol||'—'],['Alamat server',detail.remoteAddress||'—'],['Jenis',detail.type],['Content-Type',detail.mime||'—']].map(([k,v])=>`<div class="info-line"><span>${k}</span><strong>${escape(v)}</strong></div>`).join('');
   else {const response=tab==='response',text=response?detail.responseBody:detail.requestBody;const mime=response?detail.mime:contentType(detail.requestHeaders),form=isForm(mime);
     html=`<div class="body-toolbar"><span>${response?escape(detail.mime||'RESPONSE BODY'):'REQUEST BODY'}</span>${response?`<button id="copy-body">${buttonContent('copy','Salin body')}</button>`:''}</div>`;
     if(detail.error && response)html+=`<div class="body-note">${escape(detail.error)}</div>`;
     if(detail.bodyNote && response)html+=`<div class="body-note">${escape(detail.bodyNote)}</div>`;
     if(!response && detail.requestBodyTruncated)html+='<div class="body-note">Body request dipotong pada 1 MiB.</div>';
+    if(!form && text){html+=`<div class="body-modes"><button data-body-mode="form" class="${bodyMode!=='raw'?'selected':''}">Pretty</button><button data-body-mode="raw" class="${bodyMode==='raw'?'selected':''}">Raw</button></div>`;}
     if(form && text){
       html+=`<div class="body-modes" role="group" aria-label="Format body"><button data-body-mode="form" class="${bodyMode==='form'?'selected':''}">Form</button><button data-body-mode="raw" class="${bodyMode==='raw'?'selected':''}">Raw</button><span>application/x-www-form-urlencoded</span></div>`;
       const parsed=parseForm(text);
       html+=bodyMode==='raw'?`<pre class="code-block raw-body">${escape(text)}</pre>`:`<table class="headers-table form-table"><thead><tr><th>Field</th><th>Nilai</th></tr></thead><tbody>${parsed.entries.map(([k,v])=>`<tr><td>${escape(k)}</td><td>${escape(v)}</td></tr>`).join('')}</tbody></table>${parsed.truncated?'<div class="body-note">Tampilan Form dibatasi 500 field. Buka Raw untuk seluruh body yang tertangkap.</div>':''}`;
-    }else html+=text?code(text):`<div class="body-note">${response && detail.status==null?'Menunggu response…':response?'Tidak ada body yang tersedia.':'Request ini tidak memiliki body.'}</div>`;
+    }else if(response&&detail.imageBase64)html+=`<img class="response-preview" alt="Preview response" src="data:${escape(detail.mime.split(';')[0])};base64,${escape(detail.imageBase64)}">`;
+    else html+=text?(bodyMode==='raw'?`<pre class="code-block raw-body">${escape(text)}</pre>`:code(text)):`<div class="body-note">${response && detail.status==null?'Menunggu response…':response?'Tidak ada body yang tersedia.':'Request ini tidak memiliki body.'}</div>`;
   }
-  $('#detail-view').innerHTML=html;
+  $('#detail-view').innerHTML=html;window.ArusNetwork?.detailReady(detail);
+  $('#replay-button').disabled=/^wss?:/.test(detail.url)||detail.type==='Tunnel';
   document.querySelectorAll('[data-body-mode]').forEach(b=>b.addEventListener('click',()=>{bodyMode=b.dataset.bodyMode;renderDetail();}));
   $('#copy-body')?.addEventListener('click',()=>copy('response'));
 }

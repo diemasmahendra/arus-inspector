@@ -3,11 +3,16 @@ const path = require('node:path');
 const {X509Certificate,randomUUID} = require('node:crypto');
 const fs = require('node:fs/promises');
 const {CaptureStore, validUrl, isText, clip, curl, replayHeaders, MAX_BODY} = require('./capture.cjs');
-const {Agent, FILES, MAX_FILE, safeRow} = require('./agent.cjs');
+const {Agent, FILES, MAX_FILE, safeRow, safeBody} = require('./agent.cjs');
 const {CamoufoxBrowser}=require('./camoufox.cjs');
 const {BrowserTabs}=require('./browser-tabs.cjs');
 const {BrowserAgent}=require('./browser-agent.cjs');
 const {compareRequests}=require('./compare.cjs');
+const {defaults,validateSettings}=require('./proxy-settings.cjs');
+const {importSession,serializeSession,searchRows,MAX_FILE:MAX_SESSION}=require('./sessions.cjs');
+let proxySettings=defaults();const engineCalls=new Map(),breakpoints=new Map(),earlyFrames=new Map();
+function engineCall(kind,data){return new Promise((resolve,reject)=>{const id=randomUUID(),timer=setTimeout(()=>{engineCalls.delete(id);reject(Error('Mesin proxy tidak merespons.'));},10000);engineCalls.set(id,{resolve,reject,timer});engine.postMessage({kind,id,...data});});}
+function attachFrame(engineId,data){const id=store.ids.get(engineId);if(id){const row=store.get(id);store.update(id,{frames:[...(row.frames||[]),data].slice(-200)});}else{earlyFrames.set(engineId,[...(earlyFrames.get(engineId)||[]),data].slice(-200));while(earlyFrames.size>100)earlyFrames.delete(earlyFrames.keys().next().value);}}
 const {embeddedAdapter,camoufoxAdapter}=require('./browser-drivers.cjs');
 let browserAgent;
 const AGENT_APPROVED=Symbol('agent-approved');
@@ -20,14 +25,18 @@ function startEngine() {
     const timeout=setTimeout(()=>reject(new Error('Mesin capture belum siap.')),30000);
     engine=utilityProcess.fork(path.join(__dirname,'engine.cjs'),[],{stdio:'pipe',serviceName:'Arus Capture'});
     engine.on('message', msg=>{
-      if(msg.kind==='ready'){clearTimeout(timeout);enginePort=msg.port;rootCertificate=new X509Certificate(msg.certificate);engineState='ready';resolve();status();}
+      if(msg.kind==='reply'){const call=engineCalls.get(msg.id);if(call){clearTimeout(call.timer);engineCalls.delete(msg.id);msg.error?call.reject(Error(msg.error)):call.resolve(msg.data);}}
+      else if(msg.kind==='breakpoint'){breakpoints.set(msg.data.id,msg.data);send(msg);}
+      else if(msg.kind==='breakpoint-done'){breakpoints.delete(msg.id);send(msg);}
+      else if(msg.kind==='frame'&&capturing&&msg.epoch===store.generation)attachFrame(msg.engineId,msg.data);
+      else if(msg.kind==='ready'){clearTimeout(timeout);enginePort=msg.port;rootCertificate=new X509Certificate(msg.certificate);engineState='ready';resolve();status();}
       else if(msg.kind==='error'){clearTimeout(timeout);engineState='error';reject(new Error(msg.message));status();}
       else if(msg.kind==='rows' && capturing && msg.epoch===store.generation){
-        for(const data of msg.rows){const key=data.engineId;let id=store.ids.get(key);if(!id){const row=store.add(data,key);id=row.id;}else store.update(id,data);}
+        for(const data of msg.rows){const key=data.engineId;let id=store.ids.get(key);if(!id){const row=store.add(data,key);id=row.id;}else store.update(id,data);if(earlyFrames.has(key)){for(const frame of earlyFrames.get(key))attachFrame(key,frame);earlyFrames.delete(key);}}
       }
     });
     engine.on('exit',()=>{clearTimeout(timeout);engineState='error';reject(new Error('Mesin capture berhenti.'));status();});
-    engine.postMessage({kind:'start',directory:app.getPath('userData')});
+    engine.postMessage({kind:'start',directory:app.getPath('userData'),settings:proxySettings});
     engine.postMessage({kind:'clear',epoch:store.generation});
   });
   enginePromise.catch(()=>{});
@@ -92,6 +101,14 @@ function setupIpc() {
     const directory=filePaths[0];for(const name of FILES){try{await fs.access(path.join(directory,name));const {response}=await dialog.showMessageBox(inspector,{buttons:['Batal','Timpa file'],defaultId:0,cancelId:0,message:'Folder ini sudah memiliki file arahan. Timpa lima file Markdown?'});if(response!==1)return false;break;}catch{}}
     for(const name of FILES)await fs.writeFile(path.join(directory,name),agent.config.files[name]);return true;
   });
+  handle('proxy-state',()=>({settings:proxySettings,pending:[...breakpoints.values()]}));
+  handle('proxy-save',async value=>{await enginePromise;const next=validateSettings(value);await engineCall('settings',{settings:next});try{await fs.writeFile(path.join(app.getPath('userData'),'proxy-settings.json'),JSON.stringify(next));}catch(e){await engineCall('settings',{settings:proxySettings});throw e;}proxySettings=next;send({kind:'proxy-settings',data:next});return next;});
+  handle('map-file',async()=>{const result=await dialog.showOpenDialog(inspector,{title:'Pilih response Map Local (maksimal 1 MiB)',properties:['openFile']});if(result.canceled)return null;const file=result.filePaths[0],stat=await fs.stat(file);if(!stat.isFile()||stat.size>MAX_BODY)throw Error('Map Local maksimal 1 MiB.');return file;});
+  handle('breakpoint-resolve',(id,decision)=>engineCall('breakpoint-resolve',{breakpointId:id,decision}));
+  handle('search-content',query=>searchRows(store,query));
+  handle('annotate',(id,value)=>{if(typeof value?.bookmark!=='boolean'||typeof value.note!=='string'||value.note.length>4000)throw Error('Catatan tidak valid.');if(!store.get(id))throw Error('Request tidak ditemukan.');store.update(id,{bookmark:value.bookmark,note:value.note});return true;});
+  handle('session-save',async()=>{const {canceled,filePath}=await dialog.showSaveDialog(inspector,{title:'Simpan sesi lengkap — termasuk cookie, body, dan token',defaultPath:`arus-${Date.now()}.arus`,filters:[{name:'Sesi Arus',extensions:['arus']}]});if(canceled)return false;await fs.writeFile(filePath,serializeSession(store));return true;});
+  handle('session-open',async()=>{const {canceled,filePaths}=await dialog.showOpenDialog(inspector,{title:'Import sesi Arus / HAR ke daftar traffic',properties:['openFile'],filters:[{name:'Sesi traffic',extensions:['arus','har']}]});if(canceled)return null;const file=filePaths[0],stat=await fs.stat(file);if(stat.size>MAX_SESSION)throw Error('File maksimal 64 MiB.');const entries=importSession(await fs.readFile(file,'utf8'));for(const data of entries)store.add(data);return {count:entries.length};});
   handle('state',()=>({rows:store.list(),capturing,browserOpen:!!browser || !!camoufox?.isOpen,browserKind,camoufox:camoufox?.state || 'idle',engine:engineState,port:enginePort,version:app.getVersion(),update:updateState}));
   handle('open',async (input,kind=browserKind)=>{
     const url=validUrl(input);if(!['embedded','camoufox'].includes(kind))throw Error('Browser tidak dikenal.');await enginePromise;
@@ -110,7 +127,7 @@ function setupIpc() {
     if(action==='pause' || action==='resume') engine?.postMessage({kind:'capture',active:capturing});
     status();return capturing;
   });
-  handle('clear',()=>{store.clear();engine?.postMessage({kind:'clear',epoch:store.generation});return true;});
+  handle('clear',()=>{earlyFrames.clear();store.clear();engine?.postMessage({kind:'clear',epoch:store.generation});return true;});
   handle('certificate',async()=>{await enginePromise;const {canceled,filePath}=await dialog.showSaveDialog(inspector,{defaultPath:'Arus-Root-CA.crt',filters:[{name:'Certificate',extensions:['crt']}]});if(canceled)return false;await fs.writeFile(filePath,rootCertificate.toString());return true;});
   handle('detail',id=>store.get(id));
   handle('compare',(leftId,rightId)=>{if(typeof leftId!=='string'||typeof rightId!=='string'||leftId.length>100||rightId.length>100)throw Error('Request tidak valid.');const a=store.get(leftId),b=store.get(rightId);if(!a||!b)throw Error('Request sudah tidak tersedia. Pilih ulang request A dan B.');return compareRequests(a,b);});
@@ -179,6 +196,14 @@ function agentUi(name,args,signal){
 }
 async function executeAgent(name,args,signal){
   signal.throwIfAborted();
+  if(name==='search_traffic_content'){const ids=searchRows(store,args.query);return {total:ids.length,rows:ids.slice(-80).map(id=>safeRow(store.get(id)))};}
+  if(name==='inspect_websocket'){const row=store.get(args.id);if(!row)throw Error('Request tidak ditemukan.');return {frames:(row.frames||[]).slice(-40).map(f=>({isClient:f.isClient,opcode:f.opcode,length:f.length,body:f.text?safeBody(f.text,'application/json'):'[Binary/control frame omitted]'}))};}
+  if(name==='proxy_settings')return {sslBypass:proxySettings.sslBypass,rules:proxySettings.rules.map(({file,...r})=>r),pending:[...breakpoints.values()].map(r=>({id:r.id,url:safeRow(r).url,method:r.method,size:r.size}))};
+  if(name==='bookmark_request')return {saved:await actions.annotate(args.id,args)};
+  if(name==='save_session')return {saved:await actions['session-save']()};
+  if(name==='import_session')return await actions['session-open']();
+  if(name==='configure_proxy'){let next={...proxySettings};if(args.kind==='ssl_bypass')next.sslBypass=[...new Set([...next.sslBypass,args.host])];else if(args.kind==='ssl_inspect')next.sslBypass=next.sslBypass.filter(h=>h!==args.host);else next.rules=[...next.rules,{...args,method:args.method||'*',path:args.path||'/',enabled:args.enabled!==false}];next=validateSettings(next);if(!await confirmAgent('Terapkan aturan proxy?',JSON.stringify(args,null,2),signal))return {cancelled:true};await actions['proxy-save'](next);return {applied:true};}
+  if(name==='map_local'){const file=await actions['map-file']();signal.throwIfAborted();if(!file)return {cancelled:true};const next=validateSettings({...proxySettings,rules:[...proxySettings.rules,{kind:'map',host:args.host,path:args.path||'/',method:'*',enabled:true,file,mime:'application/json',status:200}]});if(!await confirmAgent('Aktifkan Map Local?',args.host+(args.path||'/')+'\n'+file,signal))return {cancelled:true};await actions['proxy-save'](next);return {applied:true};}
   if(name==='compare_requests'){const a=store.get(args.leftId),b=store.get(args.rightId);if(!a||!b)throw Error('Request tidak ditemukan.');return {comparison:compareRequests(safeRow(a,true),safeRow(b,true)),note:'Field sensitif disamarkan; nilai tersembunyi tidak dapat dibandingkan secara penuh.'};}
   if(name.startsWith('browser_'))return browserAgent.run(name,args,signal);
   if(name==='list_traffic'){
@@ -206,7 +231,8 @@ async function executeAgent(name,args,signal){
   }
   throw Error('Alat tidak tersedia.');
 }
-app.whenReady().then(()=>{
+app.whenReady().then(async()=>{
+  try{proxySettings=validateSettings(JSON.parse(await fs.readFile(path.join(app.getPath('userData'),'proxy-settings.json'),'utf8')));proxySettings.rules=proxySettings.rules.map(r=>({...r,enabled:false}));}catch{}
   inspector=secureWindow({width:1440,height:920,minWidth:1000,minHeight:650,title:'Arus',autoHideMenuBar:true,backgroundColor:'#121518',icon:path.join(__dirname,'../assets/icon.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs')}});
   inspector.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   inspector.webContents.on('will-navigate',e=>e.preventDefault());

@@ -51,7 +51,7 @@ class CaptureStore {
     row._bytes = Buffer.byteLength(JSON.stringify({...row, _bytes: 0})); this.bytes += row._bytes;
     this.notify('upsert', this.summary(row)); this.trim(); return row;
   }
-  summary(row) { const { requestBody, responseBody, requestHeaders, responseHeaders, _bytes, ...rest } = row; return rest; }
+  summary(row) { const { requestBody, responseBody, requestHeaders, responseHeaders, imageBase64, frames, certificate, _bytes, ...rest } = row; return rest; }
   list() { return [...this.rows.values()].map(r => this.summary(r)); }
   get(id) { const row = this.rows.get(id); if (!row) return null; const {_bytes, ...data} = row; return data; }
   har(sensitive = false) {
